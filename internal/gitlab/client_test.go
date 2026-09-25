@@ -37,7 +37,7 @@ func TestGetGroup(t *testing.T) {
 		if r.URL.Path != "/api/v4/groups/my-group" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode(Group{
+		_ = json.NewEncoder(w).Encode(Group{
 			ID:                             42,
 			Name:                           "My Group",
 			RequireTwoFactorAuthentication: true,
@@ -64,9 +64,9 @@ func TestListProjects_Pagination(t *testing.T) {
 		page++
 		if page == 1 {
 			w.Header().Set("X-Next-Page", "2")
-			json.NewEncoder(w).Encode([]Project{{ID: 1, Name: "project-1"}})
+			_ = json.NewEncoder(w).Encode([]Project{{ID: 1, Name: "project-1"}})
 		} else {
-			json.NewEncoder(w).Encode([]Project{{ID: 2, Name: "project-2"}})
+			_ = json.NewEncoder(w).Encode([]Project{{ID: 2, Name: "project-2"}})
 		}
 	}))
 	defer srv.Close()
@@ -84,7 +84,7 @@ func TestListProjects_Pagination(t *testing.T) {
 func TestGetGroup_PermissionDenied(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"error": "forbidden"}`))
+		_, _ = w.Write([]byte(`{"error": "forbidden"}`))
 	}))
 	defer srv.Close()
 
@@ -106,11 +106,11 @@ func TestGetGroup_PermissionDenied(t *testing.T) {
 func TestGetGroup_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"error": "not found"}`))
+		_, _ = w.Write([]byte(`{"error": "not found"}`))
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "test-token")
+	c := NewClient(srv.URL, "nonexistent")
 	_, err := c.GetGroup(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error")

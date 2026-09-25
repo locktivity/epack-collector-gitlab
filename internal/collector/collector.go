@@ -175,11 +175,9 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 		}
 
 		approvals, err := c.client.GetApprovalSettings(ctx, proj.ID)
-		if err != nil {
-			if isDenied(err) || isNotFound(err) {
-				// Free tier or no approval settings
-			}
-		} else if approvals != nil && approvals.ApprovalsBeforeMerge > 0 {
+		if err != nil && !isDenied(err) && !isNotFound(err) {
+			diag.surfaceUnavailable("approval_settings", fmt.Sprintf("project %d: %v", proj.ID, err))
+		} else if err == nil && approvals != nil && approvals.ApprovalsBeforeMerge > 0 {
 			m.approvingReviews++
 			m.approvalDetails[proj.ID] = &ApprovalDetail{
 				ApprovalsRequired:                      approvals.ApprovalsBeforeMerge,
