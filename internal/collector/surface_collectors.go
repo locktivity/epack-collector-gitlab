@@ -90,7 +90,7 @@ func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, d
 	members, err := c.client.ListGroupMembers(ctx, c.config.Group)
 	if err != nil {
 		if isDenied(err) {
-			diag.surfacePermissionDenied("members", "read_api")
+			diag.surfacePermissionDenied("members", "permission denied (requires read_api scope)")
 		} else {
 			diag.surfaceUnavailable("members", fmt.Sprintf("fetch failed: %v", err))
 		}
@@ -224,7 +224,7 @@ func (c *Collector) collectRunners(ctx context.Context, posture *GroupPosture, d
 	runners, err := c.client.ListGroupRunners(ctx, c.config.Group)
 	if err != nil {
 		if isDenied(err) {
-			diag.surfacePermissionDenied("runners", "read_api")
+			diag.surfacePermissionDenied("runners", "permission denied (requires Maintainer role or above)")
 		} else {
 			diag.surfaceUnavailable("runners", fmt.Sprintf("fetch failed: %v", err))
 		}

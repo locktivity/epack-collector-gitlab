@@ -77,7 +77,7 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 	group, err := c.client.GetGroup(ctx, c.config.Group)
 	if err != nil {
 		if isDenied(err) {
-			diag.surfacePermissionDenied("group_settings", "read_api")
+			diag.surfacePermissionDenied("group_settings", "permission denied (requires read_api scope)")
 			group = &gitlab.Group{}
 		} else {
 			return nil, fmt.Errorf("fetching group: %w", err)
@@ -89,7 +89,7 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 	allProjects, err := c.client.ListProjects(ctx, c.config.Group)
 	if err != nil {
 		if isDenied(err) {
-			diag.surfacePermissionDenied("projects", "read_api")
+			diag.surfacePermissionDenied("projects", "permission denied (requires read_api scope)")
 			allProjects = nil
 		} else {
 			return nil, fmt.Errorf("fetching projects: %w", err)
@@ -153,7 +153,7 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 		branches, err := c.client.ListProtectedBranches(ctx, proj.ID)
 		if err != nil {
 			if isDenied(err) {
-				diag.surfacePermissionDenied("protected_branches", "read_api")
+				diag.surfacePermissionDenied("protected_branches", "permission denied (requires read_api scope)")
 			}
 			continue
 		}

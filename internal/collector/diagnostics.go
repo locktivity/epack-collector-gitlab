@@ -5,9 +5,9 @@ type diagnosticsTracker struct {
 	warnings         []string
 }
 
-func (d *diagnosticsTracker) surfacePermissionDenied(surface, missingScope string) {
+func (d *diagnosticsTracker) surfacePermissionDenied(surface, reason string) {
 	d.permissionErrors = append(d.permissionErrors,
-		"surface "+surface+" skipped: permission denied (scope "+missingScope+")")
+		"surface "+surface+" skipped: "+reason)
 }
 
 func (d *diagnosticsTracker) surfaceUnavailable(surface, reason string) {
