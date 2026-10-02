@@ -1,4 +1,4 @@
-.PHONY: build test lint lint-forbidden-data clean sdk-test sdk-run
+.PHONY: build test lint lint-forbidden-data clean sdk-test sdk-run e2e
 
 BINARY_NAME := epack-collector-gitlab
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -35,6 +35,10 @@ lint-forbidden-data:
 # Clean build artifacts
 clean:
 	rm -f $(BINARY_NAME) $(BINARY_NAME)-*
+
+# E2E tests against real GitLab API (requires GITLAB_TOKEN and GITLAB_E2E_GROUP)
+e2e:
+	go test -tags e2e -race -v -count=1 ./internal/collector/
 
 # SDK development commands (requires epack with components build)
 sdk-test: build
