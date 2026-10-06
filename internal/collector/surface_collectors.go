@@ -22,7 +22,7 @@ func (c *Collector) collectSurfaces(ctx context.Context, posture *GroupPosture, 
 
 	c.collectProjects(posture, projects, metrics)
 	c.collectMembers(ctx, posture, diag)
-	c.collectWebhooks(ctx, posture, projects, diag)
+	c.collectWebhooks(ctx, posture, projects, level, diag)
 	c.collectDeployKeys(ctx, posture, projects, level, diag)
 	c.collectRunners(ctx, posture, diag)
 
@@ -132,9 +132,10 @@ func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, d
 	}
 }
 
-func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, projects []gitlab.Project, diag *diagnosticsTracker) {
+func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, projects []gitlab.Project, level componentsdk.Level, diag *diagnosticsTracker) {
 	c.status("Fetching webhooks...")
 
+	groupCount := 0
 	var groupRows []WebhookRow
 	groupHooks, err := c.client.ListGroupWebhooks(ctx, c.config.Group)
 	if err != nil {
@@ -144,36 +145,44 @@ func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, 
 			diag.surfaceUnavailable("group_webhooks", fmt.Sprintf("fetch failed: %v", err))
 		}
 	} else {
-		for _, h := range groupHooks {
-			groupRows = append(groupRows, WebhookRow{
-				ID:        h.ID,
-				Active:    h.AlertStatus != "disabled",
-				URLHost:   webhookHost(h.URL),
-				SSLVerify: h.EnableSSLVerification,
-			})
+		groupCount = len(groupHooks)
+		if level.AtLeast(componentsdk.LevelInternal) {
+			for _, h := range groupHooks {
+				groupRows = append(groupRows, WebhookRow{
+					ID:        h.ID,
+					Active:    h.AlertStatus != "disabled",
+					URLHost:   webhookHost(h.URL),
+					SSLVerify: h.EnableSSLVerification,
+				})
+			}
 		}
 	}
 
+	projectCount := 0
 	var projectRows []WebhookRow
 	for _, p := range projects {
 		hooks, err := c.client.ListProjectWebhooks(ctx, p.ID)
 		if err != nil {
+			diag.surfaceUnavailable("project_webhooks", fmt.Sprintf("project %s: %v", p.Name, err))
 			continue
 		}
-		for _, h := range hooks {
-			projectRows = append(projectRows, WebhookRow{
-				Project:   p.Name,
-				ID:        h.ID,
-				Active:    h.AlertStatus != "disabled",
-				URLHost:   webhookHost(h.URL),
-				SSLVerify: h.EnableSSLVerification,
-			})
+		projectCount += len(hooks)
+		if level.AtLeast(componentsdk.LevelInternal) {
+			for _, h := range hooks {
+				projectRows = append(projectRows, WebhookRow{
+					Project:   p.Name,
+					ID:        h.ID,
+					Active:    h.AlertStatus != "disabled",
+					URLHost:   webhookHost(h.URL),
+					SSLVerify: h.EnableSSLVerification,
+				})
+			}
 		}
 	}
 
 	posture.Webhooks = &Webhooks{
-		GroupCount:   len(groupRows),
-		ProjectCount: len(projectRows),
+		GroupCount:   groupCount,
+		ProjectCount: projectCount,
 		Group:        groupRows,
 		Project:      projectRows,
 	}
@@ -188,6 +197,7 @@ func (c *Collector) collectDeployKeys(ctx context.Context, posture *GroupPosture
 	for _, p := range projects {
 		keys, err := c.client.ListProjectDeployKeys(ctx, p.ID)
 		if err != nil {
+			diag.surfaceUnavailable("deploy_keys", fmt.Sprintf("project %s: %v", p.Name, err))
 			continue
 		}
 		for _, k := range keys {

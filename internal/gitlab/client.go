@@ -31,6 +31,7 @@ var retryableStatuses = map[int]bool{
 }
 
 var (
+	ErrUnauthorized       = fmt.Errorf("unauthorized")
 	ErrPermissionDenied   = fmt.Errorf("permission denied")
 	ErrNotFound           = fmt.Errorf("not found")
 	ErrFeatureUnavailable = fmt.Errorf("feature unavailable")
@@ -47,7 +48,9 @@ func (e *APIError) Error() string {
 
 func (e *APIError) Unwrap() error {
 	switch e.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
+		return ErrUnauthorized
+	case http.StatusForbidden:
 		return ErrPermissionDenied
 	case http.StatusNotFound:
 		return ErrNotFound
@@ -69,10 +72,33 @@ func NewClient(baseURL, token string) *Client {
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
+	origin, _ := url.Parse(baseURL)
+
 	return &Client{
-		baseURL:    baseURL + apiPrefix,
-		token:      token,
-		httpClient: &http.Client{Timeout: requestTimeout},
+		baseURL: baseURL + apiPrefix,
+		token:   token,
+		httpClient: &http.Client{
+			Timeout: requestTimeout,
+			CheckRedirect: sameOriginRedirect(origin),
+		},
+	}
+}
+
+// sameOriginRedirect returns a CheckRedirect function that only follows
+// redirects to the same scheme+host as the original request. This prevents
+// the PRIVATE-TOKEN header from leaking to a different server.
+func sameOriginRedirect(origin *url.URL) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("too many redirects")
+		}
+		if req.URL.Scheme == "http" && origin.Scheme == "https" {
+			return fmt.Errorf("refusing HTTPS-to-HTTP downgrade redirect to %s", req.URL.Host)
+		}
+		if !strings.EqualFold(req.URL.Host, origin.Host) {
+			return fmt.Errorf("refusing cross-origin redirect from %s to %s", origin.Host, req.URL.Host)
+		}
+		return nil
 	}
 }
 

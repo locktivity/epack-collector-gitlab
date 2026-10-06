@@ -120,6 +120,7 @@ type BranchProtectionDetail struct {
 	CodeOwnerApprovalRequired bool `json:"code_owner_approval_required"`
 	MergeAccessRestricted     bool `json:"merge_access_restricted"`
 	PushAccessRestricted      bool `json:"push_access_restricted"`
+	MergeRequestRequired      bool `json:"merge_request_required"`
 }
 
 type ApprovalDetail struct {

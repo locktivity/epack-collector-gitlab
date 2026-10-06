@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,7 +109,9 @@ func TestCollect_TrustLevel_BasicPosture(t *testing.T) {
 			{ID: 11, Name: "project-b", DefaultBranch: "main", Visibility: "public"},
 		},
 		protectedBranches: map[int][]gitlab.ProtectedBranch{
-			10: {{Name: "main", AllowForcePush: false, CodeOwnerApprovalRequired: true, MergeAccessLevels: []gitlab.BranchAccessLevel{{AccessLevel: 40}}}},
+			10: {{Name: "main", AllowForcePush: false, CodeOwnerApprovalRequired: true,
+				PushAccessLevels:  []gitlab.BranchAccessLevel{{AccessLevel: 0}},
+				MergeAccessLevels: []gitlab.BranchAccessLevel{{AccessLevel: 40}}}},
 		},
 		approvalSettings: map[int]*gitlab.ApprovalSettings{
 			10: {ApprovalsBeforeMerge: 2, ResetApprovalsOnPush: true},
@@ -194,6 +197,9 @@ func TestCollect_AuditLevel_IncludesInventories(t *testing.T) {
 	}
 	if posture.Webhooks.GroupCount != 1 {
 		t.Errorf("expected 1 group webhook, got %d", posture.Webhooks.GroupCount)
+	}
+	if len(posture.Webhooks.Group) != 0 {
+		t.Error("audit level should not include webhook detail rows")
 	}
 
 	if posture.Runners == nil {
@@ -300,6 +306,90 @@ func TestCollect_EmptyGroup(t *testing.T) {
 	_, err := c.Collect(context.Background(), componentsdk.LevelTrust)
 	if err == nil {
 		t.Fatal("expected error for empty group")
+	}
+}
+
+func TestCollect_Unauthorized_ReturnsError(t *testing.T) {
+	client := &fakeClient{
+		groupErr: &gitlab.APIError{StatusCode: 401, Body: "401 Unauthorized"},
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	_, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err == nil {
+		t.Fatal("expected error for 401 response")
+	}
+	if !strings.Contains(err.Error(), "authentication failed") {
+		t.Errorf("expected authentication error message, got: %v", err)
+	}
+}
+
+func TestMatchProtectionRule_ExactMatch(t *testing.T) {
+	branches := []gitlab.ProtectedBranch{
+		{Name: "*"},
+		{Name: "main"},
+	}
+	result := matchProtectionRule(branches, "main")
+	if result == nil || result.Name != "main" {
+		t.Error("expected exact match to take precedence over wildcard")
+	}
+}
+
+func TestMatchProtectionRule_WildcardFallback(t *testing.T) {
+	branches := []gitlab.ProtectedBranch{
+		{Name: "*", AllowForcePush: true},
+		{Name: "release-*", AllowForcePush: false},
+	}
+	result := matchProtectionRule(branches, "release-v1")
+	if result == nil || result.Name != "release-*" {
+		t.Error("expected more specific wildcard to match")
+	}
+	if result.AllowForcePush {
+		t.Error("expected AllowForcePush=false from release-* rule")
+	}
+}
+
+func TestMatchProtectionRule_GlobalWildcard(t *testing.T) {
+	branches := []gitlab.ProtectedBranch{
+		{Name: "*"},
+	}
+	result := matchProtectionRule(branches, "main")
+	if result == nil || result.Name != "*" {
+		t.Error("expected global wildcard to match any branch")
+	}
+}
+
+func TestIsMRRequired_NoOnePush(t *testing.T) {
+	b := &gitlab.ProtectedBranch{
+		PushAccessLevels: []gitlab.BranchAccessLevel{
+			{AccessLevel: 0},
+		},
+	}
+	if !isMRRequired(b) {
+		t.Error("expected MR required when push access_level=0 with no grants")
+	}
+}
+
+func TestIsMRRequired_DeveloperPush(t *testing.T) {
+	b := &gitlab.ProtectedBranch{
+		PushAccessLevels: []gitlab.BranchAccessLevel{
+			{AccessLevel: 30},
+		},
+	}
+	if isMRRequired(b) {
+		t.Error("expected MR not required when developers can push")
+	}
+}
+
+func TestIsMRRequired_UserGrant(t *testing.T) {
+	userID := 42
+	b := &gitlab.ProtectedBranch{
+		PushAccessLevels: []gitlab.BranchAccessLevel{
+			{AccessLevel: 0, UserID: &userID},
+		},
+	}
+	if isMRRequired(b) {
+		t.Error("expected MR not required when individual user can push")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/locktivity/epack-collector-gitlab/internal/gitlab"
@@ -76,6 +77,9 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 
 	group, err := c.client.GetGroup(ctx, c.config.Group)
 	if err != nil {
+		if isUnauthorized(err) {
+			return nil, fmt.Errorf("authentication failed: invalid or expired token")
+		}
 		if isDenied(err) {
 			diag.surfacePermissionDenied("group_settings", "permission denied (requires read_api scope)")
 			group = &gitlab.Group{}
@@ -88,6 +92,9 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 
 	allProjects, err := c.client.ListProjects(ctx, c.config.Group)
 	if err != nil {
+		if isUnauthorized(err) {
+			return nil, fmt.Errorf("authentication failed: invalid or expired token")
+		}
 		if isDenied(err) {
 			diag.surfacePermissionDenied("projects", "permission denied (requires read_api scope)")
 			allProjects = nil
@@ -154,6 +161,8 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 		if err != nil {
 			if isDenied(err) {
 				diag.surfacePermissionDenied("protected_branches", "permission denied (requires read_api scope)")
+			} else {
+				diag.surfaceUnavailable("protected_branches", fmt.Sprintf("project %s: %v", proj.Name, err))
 			}
 			continue
 		}
@@ -163,7 +172,7 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 			m.branchProtected++
 			m.branchProtections[proj.ID] = detail
 
-			if detail.MergeAccessRestricted {
+			if detail.MergeRequestRequired {
 				m.mergeRestricted++
 			}
 			if detail.CodeOwnerApprovalRequired {
@@ -177,13 +186,33 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 		approvals, err := c.client.GetApprovalSettings(ctx, proj.ID)
 		if err != nil && !isDenied(err) && !isNotFound(err) {
 			diag.surfaceUnavailable("approval_settings", fmt.Sprintf("project %d: %v", proj.ID, err))
-		} else if err == nil && approvals != nil && approvals.ApprovalsBeforeMerge > 0 {
-			m.approvingReviews++
-			m.approvalDetails[proj.ID] = &ApprovalDetail{
-				ApprovalsRequired:                      approvals.ApprovalsBeforeMerge,
-				ResetApprovalsOnPush:                   approvals.ResetApprovalsOnPush,
-				MergeRequestsDisableCommittersApproval: approvals.MergeRequestsDisableCommittersApproval,
+		}
+
+		rules, rulesErr := c.client.ListApprovalRules(ctx, proj.ID)
+		if rulesErr != nil && !isDenied(rulesErr) && !isNotFound(rulesErr) {
+			diag.surfaceUnavailable("approval_rules", fmt.Sprintf("project %d: %v", proj.ID, rulesErr))
+		}
+
+		requiredApprovals := 0
+		if err == nil && approvals != nil {
+			requiredApprovals = approvals.ApprovalsBeforeMerge
+		}
+		for _, rule := range rules {
+			if rule.ApprovalsRequired > requiredApprovals {
+				requiredApprovals = rule.ApprovalsRequired
 			}
+		}
+
+		if requiredApprovals > 0 {
+			m.approvingReviews++
+			ad := &ApprovalDetail{
+				ApprovalsRequired: requiredApprovals,
+			}
+			if err == nil && approvals != nil {
+				ad.ResetApprovalsOnPush = approvals.ResetApprovalsOnPush
+				ad.MergeRequestsDisableCommittersApproval = approvals.MergeRequestsDisableCommittersApproval
+			}
+			m.approvalDetails[proj.ID] = ad
 		}
 	}
 
@@ -191,30 +220,101 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 }
 
 func (c *Collector) analyzeProtection(branches []gitlab.ProtectedBranch, defaultBranch string) *BranchProtectionDetail {
-	for _, b := range branches {
-		if b.Name == defaultBranch {
-			mergeRestricted := false
-			pushRestricted := false
-			for _, mal := range b.MergeAccessLevels {
-				if mal.AccessLevel >= 30 {
-					mergeRestricted = true
-				}
-			}
-			for _, pal := range b.PushAccessLevels {
-				if pal.AccessLevel >= 30 {
-					pushRestricted = true
-				}
-			}
+	rule := matchProtectionRule(branches, defaultBranch)
+	if rule == nil {
+		return nil
+	}
 
-			return &BranchProtectionDetail{
-				AllowForcePush:            b.AllowForcePush,
-				CodeOwnerApprovalRequired: b.CodeOwnerApprovalRequired,
-				MergeAccessRestricted:     mergeRestricted,
-				PushAccessRestricted:      pushRestricted,
+	return &BranchProtectionDetail{
+		AllowForcePush:            rule.AllowForcePush,
+		CodeOwnerApprovalRequired: rule.CodeOwnerApprovalRequired,
+		MergeAccessRestricted:     isMergeRestricted(rule),
+		PushAccessRestricted:      isPushRestricted(rule),
+		MergeRequestRequired:      isMRRequired(rule),
+	}
+}
+
+// matchProtectionRule finds the most specific protection rule that applies to
+// the default branch, following GitLab's precedence: exact name > wildcard.
+func matchProtectionRule(branches []gitlab.ProtectedBranch, defaultBranch string) *gitlab.ProtectedBranch {
+	var bestWildcard *gitlab.ProtectedBranch
+	bestSpecificity := -1
+
+	for i := range branches {
+		b := &branches[i]
+		if b.Name == defaultBranch {
+			return b
+		}
+		if matchesWildcard(b.Name, defaultBranch) {
+			specificity := wildcardSpecificity(b.Name)
+			if specificity > bestSpecificity {
+				bestSpecificity = specificity
+				bestWildcard = b
 			}
 		}
 	}
-	return nil
+	return bestWildcard
+}
+
+// matchesWildcard checks if a GitLab wildcard pattern matches a branch name.
+// GitLab uses simple * glob matching (not full regex).
+func matchesWildcard(pattern, name string) bool {
+	if pattern == "*" {
+		return true
+	}
+	if !strings.Contains(pattern, "*") {
+		return pattern == name
+	}
+	parts := strings.SplitN(pattern, "*", 2)
+	return strings.HasPrefix(name, parts[0]) && strings.HasSuffix(name, parts[1])
+}
+
+// wildcardSpecificity returns the length of non-wildcard characters in a
+// pattern. More specific patterns take precedence.
+func wildcardSpecificity(pattern string) int {
+	return len(strings.ReplaceAll(pattern, "*", ""))
+}
+
+// isMergeRestricted returns true when merge access is limited to Developer (30) or above.
+func isMergeRestricted(b *gitlab.ProtectedBranch) bool {
+	for _, mal := range b.MergeAccessLevels {
+		if mal.AccessLevel >= 30 {
+			return true
+		}
+	}
+	return false
+}
+
+// isPushRestricted returns true when push access is limited (no direct push
+// to anyone below Developer).
+func isPushRestricted(b *gitlab.ProtectedBranch) bool {
+	for _, pal := range b.PushAccessLevels {
+		if pal.AccessLevel >= 30 {
+			return true
+		}
+	}
+	return false
+}
+
+// isMRRequired returns true when no one can push directly to the branch,
+// meaning all changes must go through a merge request.
+//
+// GitLab sets access_level=0 with no user/group/deploy_key grants to mean
+// "No one". If any individual grants exist alongside access_level=0, direct
+// push is still possible for those grantees.
+func isMRRequired(b *gitlab.ProtectedBranch) bool {
+	if len(b.PushAccessLevels) == 0 {
+		return false
+	}
+	for _, pal := range b.PushAccessLevels {
+		if pal.AccessLevel > 0 {
+			return false
+		}
+		if pal.UserID != nil || pal.GroupID != nil || pal.DeployKeyID != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Collector) populatePosture(posture *GroupPosture, group *gitlab.Group, metrics *projectMetrics, included []gitlab.Project, includePatterns, excludePatterns []string, totalProjects int) {
@@ -267,8 +367,12 @@ func percent(count, total int) int {
 	return (count * MaxPercentage) / total
 }
 
+func isUnauthorized(err error) bool {
+	return err != nil && errors.Is(err, gitlab.ErrUnauthorized)
+}
+
 func isDenied(err error) bool {
-	return err != nil && errors.Is(err, gitlab.ErrPermissionDenied)
+	return err != nil && (errors.Is(err, gitlab.ErrPermissionDenied) || errors.Is(err, gitlab.ErrUnauthorized))
 }
 
 func isNotFound(err error) bool {
