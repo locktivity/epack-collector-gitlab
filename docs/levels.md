@@ -24,7 +24,7 @@ Everything in trust, plus per-project and per-member inventories.
 - Member inventory (username, name, role, 2FA status)
 - Approval rule summaries per project
 - Webhook counts (group + project)
-- Deploy key counts
+- Deploy key counts (requires Maintainer)
 - Runner inventory
 - Audit event counts by category (Premium+)
 
@@ -36,10 +36,8 @@ Everything in audit, plus sensitive operational detail.
 
 **Additional surfaces:**
 - Full webhook detail (ID, active, events, URL host)
-- Full deploy key detail (ID, title, read-only, fingerprint, created/last-used)
-- Full runner detail (ID, name, OS, status, tags)
+- Full deploy key detail (ID, title, read-only, fingerprint, created at)
+- Full runner detail (ID, name, status, tags)
 - Audit event rows (action, actor, timestamp)
-- Vulnerability finding counts per project (Ultimate)
-- CODEOWNERS file presence and SHA-256 hash
 
 **Required scopes:** `read_api`, `read_user`

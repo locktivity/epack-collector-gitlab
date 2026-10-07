@@ -97,6 +97,8 @@ func (f *fakeClient) ListVulnerabilityFindings(_ context.Context, projectID int)
 	return nil, nil
 }
 
+func boolPtr(b bool) *bool { return &b }
+
 type fakeClientWithBranchErr struct {
 	*fakeClient
 	branchErr error
@@ -181,8 +183,8 @@ func TestCollect_AuditLevel_IncludesInventories(t *testing.T) {
 		},
 		protectedBranches: map[int][]gitlab.ProtectedBranch{},
 		members: []gitlab.Member{
-			{ID: 1, Username: "alice", Name: "Alice", AccessLevel: 50, TwoFactorEnabled: true, State: "active"},
-			{ID: 2, Username: "bob", Name: "Bob", AccessLevel: 30, TwoFactorEnabled: false, State: "active"},
+			{ID: 1, Username: "alice", Name: "Alice", AccessLevel: 50, TwoFactorEnabled: boolPtr(true), State: "active"},
+			{ID: 2, Username: "bob", Name: "Bob", AccessLevel: 30, TwoFactorEnabled: boolPtr(false), State: "active"},
 		},
 		groupWebhooks: []gitlab.Webhook{
 			{ID: 100, URL: "https://hooks.example.com/webhook", EnableSSLVerification: true},
@@ -526,6 +528,117 @@ func TestApprovalPermissionDenied_EmitsDiagnostic(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected permission error diagnostic for inaccessible approval endpoints")
+	}
+}
+
+func TestCodeOwner_OR_Semantics(t *testing.T) {
+	branches := []gitlab.ProtectedBranch{
+		{Name: "main", CodeOwnerApprovalRequired: true},
+		{Name: "m*", CodeOwnerApprovalRequired: false},
+	}
+
+	c := New(Config{Group: "test"}, &fakeClient{})
+	detail := c.analyzeProtection(branches, "main")
+	if detail == nil {
+		t.Fatal("expected non-nil protection detail")
+	}
+	if !detail.CodeOwnerApprovalRequired {
+		t.Error("expected code owner approval required when any matching rule enables it")
+	}
+}
+
+func TestApprovalRule_AppliesToAllProtectedBranches(t *testing.T) {
+	rule := gitlab.ApprovalRule{
+		ApprovalsRequired:             2,
+		AppliesToAllProtectedBranches: true,
+	}
+	if !ruleAppliesToBranch(rule, "main") {
+		t.Error("rule with applies_to_all_protected_branches should apply to main")
+	}
+	if !ruleAppliesToBranch(rule, "release-v1") {
+		t.Error("rule with applies_to_all_protected_branches should apply to any branch")
+	}
+}
+
+func TestApprovalRule_ScopedToRelease_EmptyProtectedBranches_NotGlobal(t *testing.T) {
+	rule := gitlab.ApprovalRule{
+		ApprovalsRequired:             2,
+		AppliesToAllProtectedBranches: false,
+		ProtectedBranches: []gitlab.ApprovalRuleBranch{
+			{Name: "release-*"},
+		},
+	}
+	if ruleAppliesToBranch(rule, "main") {
+		t.Error("rule scoped to release-* with applies_to_all=false should not apply to main")
+	}
+}
+
+func TestPartialApprovalFailure_EmitsDiagnostic(t *testing.T) {
+	denied := &gitlab.APIError{StatusCode: 403, Body: "forbidden"}
+	client := &fakeClientWithApprovalErr{
+		fakeClient: &fakeClient{
+			group: &gitlab.Group{ID: 1, Name: "test-group"},
+			projects: []gitlab.Project{
+				{ID: 10, Name: "proj", DefaultBranch: "main", Visibility: "private"},
+			},
+			protectedBranches: map[int][]gitlab.ProtectedBranch{},
+		},
+		approvalSettingsErr: nil,
+		approvalRulesErr:    denied,
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.Diagnostics == nil {
+		t.Fatal("expected diagnostics when one approval endpoint is denied")
+	}
+	found := false
+	for _, pe := range posture.Diagnostics.PermissionErrors {
+		if strings.Contains(pe, "approval_rules") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected permission error for inaccessible approval rules endpoint")
+	}
+}
+
+func TestMember2FA_NilPreserved(t *testing.T) {
+	client := &fakeClient{
+		group: &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{
+			{ID: 10, Name: "proj", DefaultBranch: "main", Visibility: "private"},
+		},
+		protectedBranches: map[int][]gitlab.ProtectedBranch{},
+		members: []gitlab.Member{
+			{ID: 1, Username: "alice", AccessLevel: 30, TwoFactorEnabled: nil, State: "active"},
+		},
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelAudit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.Members == nil || len(posture.Members.PerMember) == 0 {
+		t.Fatal("expected member rows")
+	}
+	if posture.Members.PerMember[0].TwoFactorEnabled != nil {
+		t.Error("expected nil 2FA status to be preserved, not defaulted to false")
+	}
+}
+
+func TestSafeDiagError(t *testing.T) {
+	apiErr := &gitlab.APIError{StatusCode: 500, Body: "sensitive internal error details"}
+	msg := safeDiagError(apiErr)
+	if strings.Contains(msg, "sensitive") {
+		t.Errorf("safeDiagError leaked API body: %s", msg)
+	}
+	if msg != "HTTP 500" {
+		t.Errorf("expected 'HTTP 500', got %s", msg)
 	}
 }
 

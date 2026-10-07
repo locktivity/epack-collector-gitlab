@@ -16,7 +16,7 @@ It collects group-wide posture metrics from the GitLab REST API and emits:
 - **Members:** group members with roles, 2FA status, and state (audit+)
 - **Projects:** per-project inventory with visibility, branch protection details, and approval settings (audit+)
 - **Webhooks:** group and project webhook counts (audit+), with host/SSL detail (internal)
-- **Deploy keys:** read-write vs read-only counts (audit+), per-key fingerprints (internal)
+- **Deploy keys:** read-write vs read-only counts (audit+, requires Maintainer), per-key fingerprints (internal)
 - **Runners:** group runner inventory with status and tags (audit+)
 - **Audit log:** 7-day audit event summary with action counts (internal)
 
@@ -87,8 +87,8 @@ Create a **service account** in your GitLab group and generate a group access to
 
 | Role | Surfaces available |
 |---|---|
-| Reporter | Group settings, projects, branches, members, deploy keys |
-| Maintainer | All Reporter surfaces + project webhooks, runners |
+| Reporter | Group settings, projects, branches, members |
+| Maintainer | All Reporter surfaces + project webhooks, deploy keys, runners |
 | Owner | All Maintainer surfaces + group webhooks, complete audit events |
 
 For the most complete collection, invite the service account as **Owner**. For a minimal setup, **Reporter** works but several surfaces will be skipped with diagnostic warnings.

@@ -92,7 +92,7 @@ func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, d
 		if isDenied(err) {
 			diag.surfacePermissionDenied("members", "permission denied (requires read_api scope)")
 		} else {
-			diag.surfaceUnavailable("members", fmt.Sprintf("fetch failed: %v", err))
+			diag.surfaceUnavailable("members", "fetch failed: "+safeDiagError(err))
 		}
 		return
 	}
@@ -118,6 +118,7 @@ func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, d
 			TwoFactorEnabled: m.TwoFactorEnabled,
 			State:            m.State,
 		})
+
 	}
 
 	t := truncateMembers(rows)
@@ -142,7 +143,7 @@ func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, 
 		if isDenied(err) {
 			diag.tierRequired("group_webhooks", "Premium")
 		} else {
-			diag.surfaceUnavailable("group_webhooks", fmt.Sprintf("fetch failed: %v", err))
+			diag.surfaceUnavailable("group_webhooks", "fetch failed: "+safeDiagError(err))
 		}
 	} else {
 		groupCount = len(groupHooks)
@@ -236,7 +237,7 @@ func (c *Collector) collectRunners(ctx context.Context, posture *GroupPosture, d
 		if isDenied(err) {
 			diag.surfacePermissionDenied("runners", "permission denied (requires Maintainer role or above)")
 		} else {
-			diag.surfaceUnavailable("runners", fmt.Sprintf("fetch failed: %v", err))
+			diag.surfaceUnavailable("runners", "fetch failed: "+safeDiagError(err))
 		}
 		return
 	}
@@ -269,7 +270,7 @@ func (c *Collector) collectAuditLog(ctx context.Context, posture *GroupPosture, 
 		if isDenied(err) {
 			diag.tierRequired("audit_events", "Premium")
 		} else {
-			diag.surfaceUnavailable("audit_events", fmt.Sprintf("fetch failed: %v", err))
+			diag.surfaceUnavailable("audit_events", "fetch failed: "+safeDiagError(err))
 		}
 		return
 	}

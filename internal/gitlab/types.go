@@ -78,11 +78,12 @@ type ApprovalSettings struct {
 
 // ApprovalRule represents a merge request approval rule.
 type ApprovalRule struct {
-	ID                int                     `json:"id"`
-	Name              string                  `json:"name"`
-	RuleType          string                  `json:"rule_type"`
-	ApprovalsRequired int                     `json:"approvals_required"`
-	ProtectedBranches []ApprovalRuleBranch    `json:"protected_branches"`
+	ID                            int                  `json:"id"`
+	Name                          string               `json:"name"`
+	RuleType                      string               `json:"rule_type"`
+	ApprovalsRequired             int                  `json:"approvals_required"`
+	AppliesToAllProtectedBranches bool                 `json:"applies_to_all_protected_branches"`
+	ProtectedBranches             []ApprovalRuleBranch `json:"protected_branches"`
 }
 
 // ApprovalRuleBranch identifies a branch that an approval rule applies to.
@@ -99,7 +100,7 @@ type Member struct {
 	State            string     `json:"state"`
 	AccessLevel      int        `json:"access_level"`
 	ExpiresAt        *string    `json:"expires_at"`
-	TwoFactorEnabled bool       `json:"two_factor_enabled"`
+	TwoFactorEnabled *bool      `json:"two_factor_enabled"`
 	CreatedAt        *time.Time `json:"created_at"`
 }
 

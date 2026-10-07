@@ -87,7 +87,7 @@ type MemberRow struct {
 	Name             string `json:"name,omitempty"`
 	Role             string `json:"role"`
 	AccessLevel      int    `json:"access_level"`
-	TwoFactorEnabled bool   `json:"two_factor_enabled"`
+	TwoFactorEnabled *bool  `json:"two_factor_enabled"`
 	State            string `json:"state,omitempty"`
 }
 
