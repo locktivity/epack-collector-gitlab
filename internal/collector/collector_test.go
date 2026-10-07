@@ -451,15 +451,15 @@ func TestRuleAppliesToBranch(t *testing.T) {
 			{Name: "release-*"},
 		},
 	}
-	if ruleAppliesToBranch(rule, "main") {
+	if ruleAppliesToBranch(rule, "main", true) {
 		t.Error("rule scoped to release-* should not apply to main")
 	}
-	if !ruleAppliesToBranch(rule, "release-v1") {
+	if !ruleAppliesToBranch(rule, "release-v1", true) {
 		t.Error("rule scoped to release-* should apply to release-v1")
 	}
 
 	globalRule := gitlab.ApprovalRule{ApprovalsRequired: 1}
-	if !ruleAppliesToBranch(globalRule, "main") {
+	if !ruleAppliesToBranch(globalRule, "main", true) {
 		t.Error("rule with no branch scope should apply to all branches")
 	}
 }
@@ -547,16 +547,23 @@ func TestCodeOwner_OR_Semantics(t *testing.T) {
 	}
 }
 
-func TestApprovalRule_AppliesToAllProtectedBranches(t *testing.T) {
+func TestApprovalRule_AppliesToAllProtectedBranches_Protected(t *testing.T) {
 	rule := gitlab.ApprovalRule{
 		ApprovalsRequired:             2,
 		AppliesToAllProtectedBranches: true,
 	}
-	if !ruleAppliesToBranch(rule, "main") {
-		t.Error("rule with applies_to_all_protected_branches should apply to main")
+	if !ruleAppliesToBranch(rule, "main", true) {
+		t.Error("rule with applies_to_all_protected_branches should apply to protected main")
 	}
-	if !ruleAppliesToBranch(rule, "release-v1") {
-		t.Error("rule with applies_to_all_protected_branches should apply to any branch")
+}
+
+func TestApprovalRule_AppliesToAllProtectedBranches_Unprotected(t *testing.T) {
+	rule := gitlab.ApprovalRule{
+		ApprovalsRequired:             2,
+		AppliesToAllProtectedBranches: true,
+	}
+	if ruleAppliesToBranch(rule, "main", false) {
+		t.Error("rule with applies_to_all_protected_branches should NOT apply to unprotected main")
 	}
 }
 
@@ -568,8 +575,37 @@ func TestApprovalRule_ScopedToRelease_EmptyProtectedBranches_NotGlobal(t *testin
 			{Name: "release-*"},
 		},
 	}
-	if ruleAppliesToBranch(rule, "main") {
+	if ruleAppliesToBranch(rule, "main", true) {
 		t.Error("rule scoped to release-* with applies_to_all=false should not apply to main")
+	}
+}
+
+func TestApprovalCoverage_UnprotectedDefaultBranch(t *testing.T) {
+	client := &fakeClient{
+		group: &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{
+			{ID: 10, Name: "proj-a", DefaultBranch: "main", Visibility: "private"},
+		},
+		protectedBranches: map[int][]gitlab.ProtectedBranch{
+			10: {{Name: "release-*",
+				PushAccessLevels: []gitlab.BranchAccessLevel{{AccessLevel: 0}},
+			}},
+		},
+		approvalRules: map[int][]gitlab.ApprovalRule{
+			10: {{
+				ApprovalsRequired:             2,
+				AppliesToAllProtectedBranches: true,
+			}},
+		},
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.BranchProtectionRules.ApprovingReviews != 0 {
+		t.Errorf("expected 0%% approving reviews (unprotected default branch), got %d", posture.BranchProtectionRules.ApprovingReviews)
 	}
 }
 
@@ -675,6 +711,47 @@ func TestToVCSPosture(t *testing.T) {
 	}
 	if vcs.SecurityFeatures.SecretScanningPct != 50 {
 		t.Errorf("expected 50%% secret scanning, got %f", vcs.SecurityFeatures.SecretScanningPct)
+	}
+}
+
+func TestSurfaceCollector_401_FailsCollection(t *testing.T) {
+	client := &fakeClient{
+		group: &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{
+			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private"},
+		},
+		protectedBranches: map[int][]gitlab.ProtectedBranch{},
+		membersErr:        gitlab.ErrUnauthorized,
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	_, err := c.Collect(context.Background(), componentsdk.LevelAudit)
+	if err == nil {
+		t.Fatal("expected error when members returns 401 at audit level")
+	}
+	if !strings.Contains(err.Error(), "authentication failed") {
+		t.Errorf("expected authentication failed error, got: %v", err)
+	}
+}
+
+func TestFatalError_DoesNotLeakBody(t *testing.T) {
+	client := &fakeClient{
+		groupErr: &gitlab.APIError{StatusCode: 500, Body: "sensitive database trace"},
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	_, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err == nil {
+		t.Fatal("expected error from GetGroup failure")
+	}
+	if strings.Contains(err.Error(), "sensitive") {
+		t.Errorf("fatal error leaked API body: %v", err)
+	}
+	if strings.Contains(err.Error(), "database") {
+		t.Errorf("fatal error leaked API body: %v", err)
+	}
+	if !strings.Contains(err.Error(), "HTTP 500") {
+		t.Errorf("expected sanitized HTTP 500, got: %v", err)
 	}
 }
 

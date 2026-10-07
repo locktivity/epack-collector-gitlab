@@ -78,13 +78,13 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 	group, err := c.client.GetGroup(ctx, c.config.Group)
 	if err != nil {
 		if isUnauthorized(err) {
-			return nil, fmt.Errorf("authentication failed: invalid or expired token")
+			return nil, errAuthFailed
 		}
 		if isDenied(err) {
 			diag.surfacePermissionDenied("group_settings", "permission denied (requires read_api scope)")
 			group = &gitlab.Group{}
 		} else {
-			return nil, fmt.Errorf("fetching group: %w", err)
+			return nil, fmt.Errorf("fetching group: %s", safeDiagError(err))
 		}
 	}
 
@@ -93,13 +93,13 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 	allProjects, err := c.client.ListProjects(ctx, c.config.Group)
 	if err != nil {
 		if isUnauthorized(err) {
-			return nil, fmt.Errorf("authentication failed: invalid or expired token")
+			return nil, errAuthFailed
 		}
 		if isDenied(err) {
 			diag.surfacePermissionDenied("projects", "permission denied (requires read_api scope)")
 			allProjects = nil
 		} else {
-			return nil, fmt.Errorf("fetching projects: %w", err)
+			return nil, fmt.Errorf("fetching projects: %s", safeDiagError(err))
 		}
 	}
 
@@ -123,7 +123,9 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 
 	c.populatePosture(posture, group, metrics, included, includePatterns, excludePatterns, len(allProjects))
 
-	c.collectSurfaces(ctx, posture, group, included, metrics, level, diag)
+	if err := c.collectSurfaces(ctx, posture, group, included, metrics, level, diag); err != nil {
+		return nil, err
+	}
 
 	posture.Diagnostics = diag.toDiagnostics()
 
@@ -163,7 +165,7 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 		branches, err := c.client.ListProtectedBranches(ctx, proj.ID)
 		if err != nil {
 			if isUnauthorized(err) {
-				return nil, fmt.Errorf("authentication failed: invalid or expired token")
+				return nil, errAuthFailed
 			}
 			if isDenied(err) {
 				diag.surfacePermissionDenied("protected_branches", "permission denied (requires read_api scope)")
@@ -191,7 +193,7 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 
 		approvals, err := c.client.GetApprovalSettings(ctx, proj.ID)
 		if isUnauthorized(err) {
-			return nil, fmt.Errorf("authentication failed: invalid or expired token")
+			return nil, errAuthFailed
 		}
 		approvalsDenied := isDenied(err) || isNotFound(err)
 		if err != nil && !approvalsDenied {
@@ -200,7 +202,7 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 
 		rules, rulesErr := c.client.ListApprovalRules(ctx, proj.ID)
 		if isUnauthorized(rulesErr) {
-			return nil, fmt.Errorf("authentication failed: invalid or expired token")
+			return nil, errAuthFailed
 		}
 		rulesDenied := isDenied(rulesErr) || isNotFound(rulesErr)
 		if rulesErr != nil && !rulesDenied {
@@ -221,8 +223,9 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 		if err == nil && approvals != nil {
 			requiredApprovals = approvals.ApprovalsBeforeMerge
 		}
+		defaultBranchProtected := detail != nil
 		for _, rule := range rules {
-			if !ruleAppliesToBranch(rule, proj.DefaultBranch) {
+			if !ruleAppliesToBranch(rule, proj.DefaultBranch, defaultBranchProtected) {
 				continue
 			}
 			if rule.ApprovalsRequired > requiredApprovals {
@@ -250,17 +253,12 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 // branch. A rule applies when:
 //   - it has no branch scope (neither ProtectedBranches nor
 //     AppliesToAllProtectedBranches is set), meaning it is project-wide, OR
-//   - AppliesToAllProtectedBranches is true (applies to every protected
-//     branch, so any protected branch including the default qualifies), OR
+//   - AppliesToAllProtectedBranches is true AND the branch is actually
+//     protected (an unprotected default branch does not qualify), OR
 //   - ProtectedBranches explicitly lists a matching branch name or pattern.
-//
-// When AppliesToAllProtectedBranches is true but ProtectedBranches is empty,
-// the rule covers all protected branches (not unprotected ones). Since we
-// only call this for branches that already have a protection rule, the
-// distinction is moot here.
-func ruleAppliesToBranch(rule gitlab.ApprovalRule, branch string) bool {
+func ruleAppliesToBranch(rule gitlab.ApprovalRule, branch string, branchIsProtected bool) bool {
 	if rule.AppliesToAllProtectedBranches {
-		return true
+		return branchIsProtected
 	}
 	if len(rule.ProtectedBranches) == 0 {
 		return true
@@ -456,6 +454,8 @@ func percent(count, total int) int {
 	}
 	return (count * MaxPercentage) / total
 }
+
+var errAuthFailed = fmt.Errorf("authentication failed: invalid or expired token")
 
 func isUnauthorized(err error) bool {
 	return err != nil && errors.Is(err, gitlab.ErrUnauthorized)

@@ -11,9 +11,9 @@ import (
 
 const auditLogWindowDays = 7
 
-func (c *Collector) collectSurfaces(ctx context.Context, posture *GroupPosture, group *gitlab.Group, projects []gitlab.Project, metrics *projectMetrics, level componentsdk.Level, diag *diagnosticsTracker) {
+func (c *Collector) collectSurfaces(ctx context.Context, posture *GroupPosture, group *gitlab.Group, projects []gitlab.Project, metrics *projectMetrics, level componentsdk.Level, diag *diagnosticsTracker) error {
 	if !level.AtLeast(componentsdk.LevelAudit) {
-		return
+		return nil
 	}
 
 	posture.AccessControl.ProjectCreationLevel = group.ProjectCreationLevel
@@ -21,14 +21,25 @@ func (c *Collector) collectSurfaces(ctx context.Context, posture *GroupPosture, 
 	posture.AccessControl.ShareWithGroupLock = &shareWithGroupLock
 
 	c.collectProjects(posture, projects, metrics)
-	c.collectMembers(ctx, posture, diag)
-	c.collectWebhooks(ctx, posture, projects, level, diag)
-	c.collectDeployKeys(ctx, posture, projects, level, diag)
-	c.collectRunners(ctx, posture, diag)
+	if err := c.collectMembers(ctx, posture, diag); err != nil {
+		return err
+	}
+	if err := c.collectWebhooks(ctx, posture, projects, level, diag); err != nil {
+		return err
+	}
+	if err := c.collectDeployKeys(ctx, posture, projects, level, diag); err != nil {
+		return err
+	}
+	if err := c.collectRunners(ctx, posture, diag); err != nil {
+		return err
+	}
 
 	if level.AtLeast(componentsdk.LevelInternal) {
-		c.collectAuditLog(ctx, posture, diag)
+		if err := c.collectAuditLog(ctx, posture, diag); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (c *Collector) collectProjects(posture *GroupPosture, projects []gitlab.Project, metrics *projectMetrics) {
@@ -84,17 +95,20 @@ func (c *Collector) collectProjects(posture *GroupPosture, projects []gitlab.Pro
 	}
 }
 
-func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, diag *diagnosticsTracker) {
+func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, diag *diagnosticsTracker) error {
 	c.status("Fetching members...")
 
 	members, err := c.client.ListGroupMembers(ctx, c.config.Group)
 	if err != nil {
+		if isUnauthorized(err) {
+			return errAuthFailed
+		}
 		if isDenied(err) {
 			diag.surfacePermissionDenied("members", "permission denied (requires read_api scope)")
 		} else {
 			diag.surfaceUnavailable("members", "fetch failed: "+safeDiagError(err))
 		}
-		return
+		return nil
 	}
 
 	owners, maintainers, developers := 0, 0, 0
@@ -131,15 +145,19 @@ func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, d
 		Truncated:        t.truncated,
 		TruncatedDropped: t.truncatedDropped,
 	}
+	return nil
 }
 
-func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, projects []gitlab.Project, level componentsdk.Level, diag *diagnosticsTracker) {
+func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, projects []gitlab.Project, level componentsdk.Level, diag *diagnosticsTracker) error {
 	c.status("Fetching webhooks...")
 
 	groupCount := 0
 	var groupRows []WebhookRow
 	groupHooks, err := c.client.ListGroupWebhooks(ctx, c.config.Group)
 	if err != nil {
+		if isUnauthorized(err) {
+			return errAuthFailed
+		}
 		if isDenied(err) {
 			diag.tierRequired("group_webhooks", "Premium")
 		} else {
@@ -164,6 +182,9 @@ func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, 
 	for _, p := range projects {
 		hooks, err := c.client.ListProjectWebhooks(ctx, p.ID)
 		if err != nil {
+			if isUnauthorized(err) {
+				return errAuthFailed
+			}
 			diag.surfaceUnavailable("project_webhooks", fmt.Sprintf("project %s: fetch failed", p.Name))
 			continue
 		}
@@ -187,9 +208,10 @@ func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, 
 		Group:        groupRows,
 		Project:      projectRows,
 	}
+	return nil
 }
 
-func (c *Collector) collectDeployKeys(ctx context.Context, posture *GroupPosture, projects []gitlab.Project, level componentsdk.Level, diag *diagnosticsTracker) {
+func (c *Collector) collectDeployKeys(ctx context.Context, posture *GroupPosture, projects []gitlab.Project, level componentsdk.Level, diag *diagnosticsTracker) error {
 	c.status("Fetching deploy keys...")
 
 	totalCount, readWriteCount := 0, 0
@@ -198,6 +220,9 @@ func (c *Collector) collectDeployKeys(ctx context.Context, posture *GroupPosture
 	for _, p := range projects {
 		keys, err := c.client.ListProjectDeployKeys(ctx, p.ID)
 		if err != nil {
+			if isUnauthorized(err) {
+				return errAuthFailed
+			}
 			diag.surfaceUnavailable("deploy_keys", fmt.Sprintf("project %s: fetch failed", p.Name))
 			continue
 		}
@@ -227,19 +252,23 @@ func (c *Collector) collectDeployKeys(ctx context.Context, posture *GroupPosture
 		ReadWriteCount: readWriteCount,
 		PerKey:         rows,
 	}
+	return nil
 }
 
-func (c *Collector) collectRunners(ctx context.Context, posture *GroupPosture, diag *diagnosticsTracker) {
+func (c *Collector) collectRunners(ctx context.Context, posture *GroupPosture, diag *diagnosticsTracker) error {
 	c.status("Fetching runners...")
 
 	runners, err := c.client.ListGroupRunners(ctx, c.config.Group)
 	if err != nil {
+		if isUnauthorized(err) {
+			return errAuthFailed
+		}
 		if isDenied(err) {
 			diag.surfacePermissionDenied("runners", "permission denied (requires Maintainer role or above)")
 		} else {
 			diag.surfaceUnavailable("runners", "fetch failed: "+safeDiagError(err))
 		}
-		return
+		return nil
 	}
 
 	var rows []RunnerRow
@@ -259,20 +288,24 @@ func (c *Collector) collectRunners(ctx context.Context, posture *GroupPosture, d
 		GroupRunnerCount: len(runners),
 		PerRunner:        rows,
 	}
+	return nil
 }
 
-func (c *Collector) collectAuditLog(ctx context.Context, posture *GroupPosture, diag *diagnosticsTracker) {
+func (c *Collector) collectAuditLog(ctx context.Context, posture *GroupPosture, diag *diagnosticsTracker) error {
 	c.status("Fetching audit events...")
 
 	since := time.Now().UTC().AddDate(0, 0, -auditLogWindowDays)
 	events, err := c.client.ListGroupAuditEvents(ctx, c.config.Group, since)
 	if err != nil {
+		if isUnauthorized(err) {
+			return errAuthFailed
+		}
 		if isDenied(err) {
 			diag.tierRequired("audit_events", "Premium")
 		} else {
 			diag.surfaceUnavailable("audit_events", "fetch failed: "+safeDiagError(err))
 		}
-		return
+		return nil
 	}
 
 	countByAction := make(map[string]int)
@@ -307,6 +340,7 @@ func (c *Collector) collectAuditLog(ctx context.Context, posture *GroupPosture, 
 		Truncated:        truncated,
 		TruncatedDropped: truncatedDropped,
 	}
+	return nil
 }
 
 func accessLevelName(level int) string {

@@ -5,14 +5,15 @@ import "time"
 // VCSPosture represents the normalized version control system posture.
 // This follows the evidencepack/vcs-posture@v1 schema specification.
 type VCSPosture struct {
-	SchemaVersion    string                     `json:"schema_version"`
-	CollectedAt      string                     `json:"collected_at"`
-	Provider         string                     `json:"provider"`
-	Organization     string                     `json:"organization"`
-	OrgSecurity      VCSPostureOrgSecurity      `json:"org_security"`
-	RepoCoveragePct  float64                    `json:"repo_coverage_pct"`
-	BranchProtection VCSPostureBranchProtection `json:"branch_protection"`
-	SecurityFeatures VCSPostureSecurityFeatures `json:"security_features"`
+	SchemaVersion      string                     `json:"schema_version"`
+	CollectedAt        string                     `json:"collected_at"`
+	Provider           string                     `json:"provider"`
+	Organization       string                     `json:"organization"`
+	OrgSecurity        VCSPostureOrgSecurity      `json:"org_security"`
+	RepoCoveragePct    float64                    `json:"repo_coverage_pct"`
+	BranchProtection   VCSPostureBranchProtection `json:"branch_protection"`
+	SecurityFeatures   VCSPostureSecurityFeatures `json:"security_features"`
+	UnavailableSources []string                   `json:"unavailable_sources,omitempty"`
 }
 
 type VCSPostureOrgSecurity struct {
@@ -36,6 +37,12 @@ type VCSPostureSecurityFeatures struct {
 func (g *GroupPosture) ToVCSPosture() *VCSPosture {
 	twoFA := g.AccessControl.TwoFactorRequired != nil && *g.AccessControl.TwoFactorRequired
 
+	var unavailable []string
+	if g.Diagnostics != nil {
+		unavailable = append(unavailable, g.Diagnostics.PermissionErrors...)
+		unavailable = append(unavailable, g.Diagnostics.Warnings...)
+	}
+
 	return &VCSPosture{
 		SchemaVersion:   "1.0.0",
 		CollectedAt:     time.Now().UTC().Format(time.RFC3339),
@@ -56,5 +63,6 @@ func (g *GroupPosture) ToVCSPosture() *VCSPosture {
 			SecretScanningPct: float64(g.SecurityFeatures.SecretPushProtection), // LINT-ALLOW: coverage percentage, not a secret value
 			CodeScanningPct:   0, // SAST config lives in .gitlab-ci.yml, not queryable via REST
 		},
+		UnavailableSources: unavailable,
 	}
 }

@@ -23,10 +23,9 @@ Everything in trust, plus per-project and per-member inventories.
 - Project inventory (name, visibility, archived status, branch protection detail)
 - Member inventory (username, name, role, 2FA status)
 - Approval rule summaries per project
-- Webhook counts (group + project)
+- Webhook counts (group + project; group webhooks require Owner, project webhooks require Maintainer)
 - Deploy key counts (requires Maintainer)
-- Runner inventory
-- Audit event counts by category (Premium+)
+- Runner inventory (requires Maintainer)
 
 **Required scopes:** `read_api`, `read_user` (recommended)
 
@@ -35,9 +34,9 @@ Everything in trust, plus per-project and per-member inventories.
 Everything in audit, plus sensitive operational detail.
 
 **Additional surfaces:**
-- Full webhook detail (ID, active, events, URL host)
+- Full webhook detail (ID, active, URL host, SSL verify)
 - Full deploy key detail (ID, title, read-only, fingerprint, created at)
 - Full runner detail (ID, name, status, tags)
-- Audit event rows (action, actor, timestamp)
+- Audit event summary and rows (action, actor, timestamp; requires Premium+ and Owner role)
 
 **Required scopes:** `read_api`, `read_user`
