@@ -83,24 +83,23 @@ The collector uses a GitLab access token (group or personal) passed via the `GIT
 
 ### Recommended setup
 
-Create a **service account** in your GitLab group and generate a group access token with the `read_api` scope. Then invite the service account to the group as a **Reporter** member.
+Create a **service account** in your GitLab group and generate a group access token with the `read_api` scope. The role you assign determines which surfaces are collected:
 
-Reporter provides read access to all collector-needed data. The one exception is the **runners** API, which requires **Maintainer** role. If the token lacks Maintainer access, runner data is skipped with a diagnostic warning rather than failing the collection.
+| Role | Surfaces available |
+|---|---|
+| Reporter | Group settings, projects, branches, members, deploy keys |
+| Maintainer | All Reporter surfaces + project webhooks, runners |
+| Owner | All Maintainer surfaces + group webhooks, complete audit events |
+
+For the most complete collection, invite the service account as **Owner**. For a minimal setup, **Reporter** works but several surfaces will be skipped with diagnostic warnings.
 
 ### Required token scope
 
 | Scope | What it covers |
 |---|---|
-| `read_api` | All collector surfaces (group, projects, branches, members, webhooks, deploy keys, audit events) |
+| `read_api` | All collector surfaces (group, projects, branches, members, webhooks, deploy keys, runners, audit events) |
 
-### Required role
-
-| Role | Surfaces |
-|---|---|
-| Reporter (minimum) | All surfaces except runners |
-| Maintainer | Runners API |
-
-If a surface is inaccessible due to insufficient permissions or tier requirements (e.g., audit events require Premium), the collector emits a diagnostic warning and continues. It does not fail the run unless the token itself is invalid (401).
+If a surface is inaccessible due to insufficient role or tier requirements (e.g., audit events require Premium), the collector emits a diagnostic warning and continues. It does not fail the run unless the token itself is invalid (401).
 
 ## Development
 

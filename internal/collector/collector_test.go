@@ -97,6 +97,29 @@ func (f *fakeClient) ListVulnerabilityFindings(_ context.Context, projectID int)
 	return nil, nil
 }
 
+type fakeClientWithBranchErr struct {
+	*fakeClient
+	branchErr error
+}
+
+func (f *fakeClientWithBranchErr) ListProtectedBranches(_ context.Context, _ int) ([]gitlab.ProtectedBranch, error) {
+	return nil, f.branchErr
+}
+
+type fakeClientWithApprovalErr struct {
+	*fakeClient
+	approvalSettingsErr error
+	approvalRulesErr    error
+}
+
+func (f *fakeClientWithApprovalErr) GetApprovalSettings(_ context.Context, _ int) (*gitlab.ApprovalSettings, error) {
+	return nil, f.approvalSettingsErr
+}
+
+func (f *fakeClientWithApprovalErr) ListApprovalRules(_ context.Context, _ int) ([]gitlab.ApprovalRule, error) {
+	return nil, f.approvalRulesErr
+}
+
 func TestCollect_TrustLevel_BasicPosture(t *testing.T) {
 	client := &fakeClient{
 		group: &gitlab.Group{
@@ -324,72 +347,185 @@ func TestCollect_Unauthorized_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestMatchProtectionRule_ExactMatch(t *testing.T) {
+func TestMatchingProtectionRules_ExactAndWildcard(t *testing.T) {
 	branches := []gitlab.ProtectedBranch{
 		{Name: "*"},
 		{Name: "main"},
 	}
-	result := matchProtectionRule(branches, "main")
-	if result == nil || result.Name != "main" {
-		t.Error("expected exact match to take precedence over wildcard")
+	result := matchingProtectionRules(branches, "main")
+	if len(result) != 2 {
+		t.Errorf("expected 2 matching rules, got %d", len(result))
 	}
 }
 
-func TestMatchProtectionRule_WildcardFallback(t *testing.T) {
+func TestMatchingProtectionRules_NoMatch(t *testing.T) {
 	branches := []gitlab.ProtectedBranch{
-		{Name: "*", AllowForcePush: true},
-		{Name: "release-*", AllowForcePush: false},
+		{Name: "release-*"},
 	}
-	result := matchProtectionRule(branches, "release-v1")
-	if result == nil || result.Name != "release-*" {
-		t.Error("expected more specific wildcard to match")
-	}
-	if result.AllowForcePush {
-		t.Error("expected AllowForcePush=false from release-* rule")
+	result := matchingProtectionRules(branches, "main")
+	if len(result) != 0 {
+		t.Errorf("expected 0 matching rules, got %d", len(result))
 	}
 }
 
-func TestMatchProtectionRule_GlobalWildcard(t *testing.T) {
+func TestOverlappingRules_PermissiveWins(t *testing.T) {
 	branches := []gitlab.ProtectedBranch{
-		{Name: "*"},
+		{Name: "main", AllowForcePush: false,
+			PushAccessLevels: []gitlab.BranchAccessLevel{{AccessLevel: 0}},
+		},
+		{Name: "m*", AllowForcePush: true,
+			PushAccessLevels: []gitlab.BranchAccessLevel{{AccessLevel: 30}},
+		},
 	}
-	result := matchProtectionRule(branches, "main")
-	if result == nil || result.Name != "*" {
-		t.Error("expected global wildcard to match any branch")
+
+	c := New(Config{Group: "test"}, &fakeClient{})
+	detail := c.analyzeProtection(branches, "main")
+	if detail == nil {
+		t.Fatal("expected non-nil protection detail")
+	}
+	if !detail.AllowForcePush {
+		t.Error("expected force push allowed when any matching rule allows it")
+	}
+	if detail.MergeRequestRequired {
+		t.Error("expected MR not required when a matching rule grants push access")
 	}
 }
 
 func TestIsMRRequired_NoOnePush(t *testing.T) {
-	b := &gitlab.ProtectedBranch{
-		PushAccessLevels: []gitlab.BranchAccessLevel{
-			{AccessLevel: 0},
-		},
-	}
-	if !isMRRequired(b) {
+	levels := []gitlab.BranchAccessLevel{{AccessLevel: 0}}
+	if !isMRRequired(levels) {
 		t.Error("expected MR required when push access_level=0 with no grants")
 	}
 }
 
 func TestIsMRRequired_DeveloperPush(t *testing.T) {
-	b := &gitlab.ProtectedBranch{
-		PushAccessLevels: []gitlab.BranchAccessLevel{
-			{AccessLevel: 30},
-		},
-	}
-	if isMRRequired(b) {
+	levels := []gitlab.BranchAccessLevel{{AccessLevel: 30}}
+	if isMRRequired(levels) {
 		t.Error("expected MR not required when developers can push")
 	}
 }
 
 func TestIsMRRequired_UserGrant(t *testing.T) {
 	userID := 42
-	b := &gitlab.ProtectedBranch{
-		PushAccessLevels: []gitlab.BranchAccessLevel{
-			{AccessLevel: 0, UserID: &userID},
+	levels := []gitlab.BranchAccessLevel{{AccessLevel: 0, UserID: &userID}}
+	if isMRRequired(levels) {
+		t.Error("expected MR not required when individual user can push")
+	}
+}
+
+func TestMatchesWildcard(t *testing.T) {
+	tests := []struct {
+		pattern string
+		name    string
+		want    bool
+	}{
+		{"*", "main", true},
+		{"*", "", true},
+		{"main", "main", true},
+		{"main", "develop", false},
+		{"m*", "main", true},
+		{"m*", "develop", false},
+		{"*gitlab*", "gitlab", true},
+		{"*gitlab*", "gitlab/staging", true},
+		{"*gitlab*", "my-gitlab-repo", true},
+		{"*gitlab*", "other", false},
+		{"main*main", "main", false},
+		{"main*main", "mainXmain", true},
+		{"release-*", "release-v1", true},
+		{"release-*", "main", false},
+	}
+	for _, tt := range tests {
+		got := matchesWildcard(tt.pattern, tt.name)
+		if got != tt.want {
+			t.Errorf("matchesWildcard(%q, %q) = %v, want %v", tt.pattern, tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestRuleAppliesToBranch(t *testing.T) {
+	rule := gitlab.ApprovalRule{
+		ApprovalsRequired: 2,
+		ProtectedBranches: []gitlab.ApprovalRuleBranch{
+			{Name: "release-*"},
 		},
 	}
-	if isMRRequired(b) {
-		t.Error("expected MR not required when individual user can push")
+	if ruleAppliesToBranch(rule, "main") {
+		t.Error("rule scoped to release-* should not apply to main")
+	}
+	if !ruleAppliesToBranch(rule, "release-v1") {
+		t.Error("rule scoped to release-* should apply to release-v1")
+	}
+
+	globalRule := gitlab.ApprovalRule{ApprovalsRequired: 1}
+	if !ruleAppliesToBranch(globalRule, "main") {
+		t.Error("rule with no branch scope should apply to all branches")
+	}
+}
+
+func TestDiagnostics_TrustLevel_NoProjectNames(t *testing.T) {
+	client := &fakeClient{
+		group: &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{
+			{ID: 10, Name: "secret-project", DefaultBranch: "main", Visibility: "private"},
+		},
+		protectedBranches: map[int][]gitlab.ProtectedBranch{
+			10: nil,
+		},
+	}
+
+	client.protectedBranches = map[int][]gitlab.ProtectedBranch{}
+	delete(client.protectedBranches, 10)
+
+	fakeBranchErr := &fakeClientWithBranchErr{
+		fakeClient: client,
+		branchErr:  &gitlab.APIError{StatusCode: 500, Body: "internal error"},
+	}
+
+	c := New(Config{Group: "test-group"}, fakeBranchErr)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.Diagnostics == nil {
+		t.Fatal("expected diagnostics with warnings")
+	}
+	for _, w := range posture.Diagnostics.Warnings {
+		if strings.Contains(w, "secret-project") {
+			t.Errorf("trust-level diagnostic leaked project name: %s", w)
+		}
+	}
+}
+
+func TestApprovalPermissionDenied_EmitsDiagnostic(t *testing.T) {
+	denied := &gitlab.APIError{StatusCode: 403, Body: "forbidden"}
+	client := &fakeClientWithApprovalErr{
+		fakeClient: &fakeClient{
+			group: &gitlab.Group{ID: 1, Name: "test-group"},
+			projects: []gitlab.Project{
+				{ID: 10, Name: "proj", DefaultBranch: "main", Visibility: "private"},
+			},
+			protectedBranches: map[int][]gitlab.ProtectedBranch{},
+		},
+		approvalSettingsErr: denied,
+		approvalRulesErr:    denied,
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.Diagnostics == nil {
+		t.Fatal("expected diagnostics when approval endpoints are denied")
+	}
+	found := false
+	for _, pe := range posture.Diagnostics.PermissionErrors {
+		if strings.Contains(pe, "approvals") && strings.Contains(pe, "inaccessible") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected permission error diagnostic for inaccessible approval endpoints")
 	}
 }
 

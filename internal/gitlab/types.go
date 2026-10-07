@@ -78,10 +78,17 @@ type ApprovalSettings struct {
 
 // ApprovalRule represents a merge request approval rule.
 type ApprovalRule struct {
-	ID                int    `json:"id"`
-	Name              string `json:"name"`
-	RuleType          string `json:"rule_type"`
-	ApprovalsRequired int    `json:"approvals_required"`
+	ID                int                     `json:"id"`
+	Name              string                  `json:"name"`
+	RuleType          string                  `json:"rule_type"`
+	ApprovalsRequired int                     `json:"approvals_required"`
+	ProtectedBranches []ApprovalRuleBranch    `json:"protected_branches"`
+}
+
+// ApprovalRuleBranch identifies a branch that an approval rule applies to.
+type ApprovalRuleBranch struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
 }
 
 // Member represents a group or project member.

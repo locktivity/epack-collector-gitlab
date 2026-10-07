@@ -163,7 +163,7 @@ func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, 
 	for _, p := range projects {
 		hooks, err := c.client.ListProjectWebhooks(ctx, p.ID)
 		if err != nil {
-			diag.surfaceUnavailable("project_webhooks", fmt.Sprintf("project %s: %v", p.Name, err))
+			diag.surfaceUnavailable("project_webhooks", fmt.Sprintf("project %s: fetch failed", p.Name))
 			continue
 		}
 		projectCount += len(hooks)
@@ -197,7 +197,7 @@ func (c *Collector) collectDeployKeys(ctx context.Context, posture *GroupPosture
 	for _, p := range projects {
 		keys, err := c.client.ListProjectDeployKeys(ctx, p.ID)
 		if err != nil {
-			diag.surfaceUnavailable("deploy_keys", fmt.Sprintf("project %s: %v", p.Name, err))
+			diag.surfaceUnavailable("deploy_keys", fmt.Sprintf("project %s: fetch failed", p.Name))
 			continue
 		}
 		for _, k := range keys {
