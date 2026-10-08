@@ -85,7 +85,7 @@ epack collect
     "projects_coverage": 100
   },
   "posture": {
-    "branch_protection_coverage": 85,
+    "branch_protection_coverage": 95,
     "security_features_coverage": 72
   },
   "access_control": {
