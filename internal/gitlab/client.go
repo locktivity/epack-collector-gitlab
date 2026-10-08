@@ -253,6 +253,7 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, target
 }
 
 // paginate walks through paginated results using offset pagination.
+// It checks X-Next-Page first, then falls back to parsing Link rel="next".
 func (c *Client) paginate(ctx context.Context, path string, params url.Values, target any) error {
 	page := 1
 	for {
@@ -268,17 +269,63 @@ func (c *Client) paginate(ctx context.Context, path string, params url.Values, t
 			return fmt.Errorf("decoding page %d: %w", page, err)
 		}
 
-		nextPage := resp.Header.Get("X-Next-Page")
-		if nextPage == "" {
-			break
-		}
-		next, err := strconv.Atoi(nextPage)
-		if err != nil || next <= page {
+		next, ok := nextPageFromHeaders(resp.Header, page)
+		if !ok {
 			break
 		}
 		page = next
 	}
 	return nil
+}
+
+// nextPageFromHeaders extracts the next page number from response headers.
+// It checks X-Next-Page first, then falls back to the Link header's rel="next".
+func nextPageFromHeaders(h http.Header, currentPage int) (int, bool) {
+	if xnp := h.Get("X-Next-Page"); xnp != "" {
+		n, err := strconv.Atoi(xnp)
+		if err == nil && n > currentPage {
+			return n, true
+		}
+		return 0, false
+	}
+
+	for _, link := range h.Values("Link") {
+		if n, ok := parseLinkNextPage(link); ok && n > currentPage {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// parseLinkNextPage extracts the page number from a Link header value
+// containing rel="next". Only the page query parameter is used; the full
+// URL is not followed, preserving the client's origin restrictions.
+func parseLinkNextPage(header string) (int, bool) {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		start := strings.Index(part, "<")
+		end := strings.Index(part, ">")
+		if start < 0 || end <= start {
+			continue
+		}
+		linkURL, err := url.Parse(part[start+1 : end])
+		if err != nil {
+			continue
+		}
+		pageStr := linkURL.Query().Get("page")
+		if pageStr == "" {
+			continue
+		}
+		n, err := strconv.Atoi(pageStr)
+		if err != nil {
+			continue
+		}
+		return n, true
+	}
+	return 0, false
 }
 
 // getWithResponse performs a GET with retry and returns the response for header inspection.

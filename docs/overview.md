@@ -37,7 +37,7 @@ Percentages describe the projects visible to the token after filtering. `project
 
 Pipeline coverage reports the project's `only_allow_merge_if_pipeline_succeeds` flag. It does not inspect pipeline contents or prove that every change ran checks. Code owner coverage reports the branch flag; it does not verify that a CODEOWNERS file exists or covers all paths. Approval inventory records the maximum applicable approval count, not a complete copy of approval rules or approver identities.
 
-The normalized `signed_commits_pct`, `vuln_alerts_pct`, and `code_scanning_pct` are currently fixed at zero because this collector does not measure them. They are not evidence of disabled controls. `unavailable_sources` currently copies detailed diagnostics, so it does not automatically identify these unmeasured metrics. Missing security booleans in successful API responses can also appear as false or zero without diagnostics.
+The normalized `signed_commits_pct`, `vuln_alerts_pct`, and `code_scanning_pct` are fixed at zero because this collector does not measure them. Each is listed in `unavailable_sources` with an explanation. `unavailable_sources` also includes runtime diagnostics from permission errors and endpoint failures. Projects that omit `secret_push_protection_enabled` (due to tier or role restrictions) emit a diagnostic noting how many projects could not report the field.
 
 Endpoint failures appear in diagnostics where collection can continue. A failed optional endpoint can lower coverage or counts, and counts of zero can reflect inaccessible data. Inspect diagnostics alongside the metrics. HTTP 401 fails collection at every surface; non-permission errors retrieving the group or project list also fail collection.
 

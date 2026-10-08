@@ -11,14 +11,16 @@ import (
 
 const auditLogWindowDays = 7
 
-func (c *Collector) collectSurfaces(ctx context.Context, posture *GroupPosture, group *gitlab.Group, projects []gitlab.Project, metrics *projectMetrics, level componentsdk.Level, diag *diagnosticsTracker) error {
+func (c *Collector) collectSurfaces(ctx context.Context, posture *GroupPosture, group *gitlab.Group, projects []gitlab.Project, metrics *projectMetrics, level componentsdk.Level, groupSettingsAvailable bool, diag *diagnosticsTracker) error {
 	if !level.AtLeast(componentsdk.LevelAudit) {
 		return nil
 	}
 
-	posture.AccessControl.ProjectCreationLevel = group.ProjectCreationLevel
-	shareWithGroupLock := group.ShareWithGroupLock
-	posture.AccessControl.ShareWithGroupLock = &shareWithGroupLock
+	if groupSettingsAvailable {
+		posture.AccessControl.ProjectCreationLevel = group.ProjectCreationLevel
+		shareWithGroupLock := group.ShareWithGroupLock
+		posture.AccessControl.ShareWithGroupLock = &shareWithGroupLock
+	}
 
 	c.collectProjects(posture, projects, metrics)
 	if err := c.collectMembers(ctx, posture, diag); err != nil {
@@ -100,6 +102,9 @@ func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, d
 
 	members, err := c.client.ListGroupMembers(ctx, c.config.Group)
 	if err != nil {
+		if isContextError(err) {
+			return err
+		}
 		if isUnauthorized(err) {
 			return errAuthFailed
 		}
@@ -155,6 +160,9 @@ func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, 
 	var groupRows []WebhookRow
 	groupHooks, err := c.client.ListGroupWebhooks(ctx, c.config.Group)
 	if err != nil {
+		if isContextError(err) {
+			return err
+		}
 		if isUnauthorized(err) {
 			return errAuthFailed
 		}
@@ -182,6 +190,9 @@ func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, 
 	for _, p := range projects {
 		hooks, err := c.client.ListProjectWebhooks(ctx, p.ID)
 		if err != nil {
+			if isContextError(err) {
+				return err
+			}
 			if isUnauthorized(err) {
 				return errAuthFailed
 			}
@@ -220,6 +231,9 @@ func (c *Collector) collectDeployKeys(ctx context.Context, posture *GroupPosture
 	for _, p := range projects {
 		keys, err := c.client.ListProjectDeployKeys(ctx, p.ID)
 		if err != nil {
+			if isContextError(err) {
+				return err
+			}
 			if isUnauthorized(err) {
 				return errAuthFailed
 			}
@@ -260,6 +274,9 @@ func (c *Collector) collectRunners(ctx context.Context, posture *GroupPosture, d
 
 	runners, err := c.client.ListGroupRunners(ctx, c.config.Group)
 	if err != nil {
+		if isContextError(err) {
+			return err
+		}
 		if isUnauthorized(err) {
 			return errAuthFailed
 		}
@@ -297,6 +314,9 @@ func (c *Collector) collectAuditLog(ctx context.Context, posture *GroupPosture, 
 	since := time.Now().UTC().AddDate(0, 0, -auditLogWindowDays)
 	events, err := c.client.ListGroupAuditEvents(ctx, c.config.Group, since)
 	if err != nil {
+		if isContextError(err) {
+			return err
+		}
 		if isUnauthorized(err) {
 			return errAuthFailed
 		}

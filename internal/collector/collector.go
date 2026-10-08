@@ -132,8 +132,12 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 
 	c.populatePosture(posture, group, metrics, included, includePatterns, excludePatterns, len(allProjects), groupSettingsAvailable, diag)
 
-	if err := c.collectSurfaces(ctx, posture, group, included, metrics, level, diag); err != nil {
+	if err := c.collectSurfaces(ctx, posture, group, included, metrics, level, groupSettingsAvailable, diag); err != nil {
 		return nil, err
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("collection canceled: %w", err)
 	}
 
 	posture.Diagnostics = diag.toDiagnostics()
@@ -176,8 +180,15 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 			m.pipelineRequired++
 		}
 
+		if proj.DefaultBranch == "" {
+			continue
+		}
+
 		branches, err := c.client.ListProtectedBranches(ctx, proj.ID)
 		if err != nil {
+			if isContextError(err) {
+				return nil, err
+			}
 			if isUnauthorized(err) {
 				return nil, errAuthFailed
 			}
@@ -206,6 +217,9 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 		}
 
 		approvals, err := c.client.GetApprovalSettings(ctx, proj.ID)
+		if isContextError(err) {
+			return nil, err
+		}
 		if isUnauthorized(err) {
 			return nil, errAuthFailed
 		}
@@ -215,6 +229,9 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 		}
 
 		rules, rulesErr := c.client.ListApprovalRules(ctx, proj.ID)
+		if isContextError(rulesErr) {
+			return nil, rulesErr
+		}
 		if isUnauthorized(rulesErr) {
 			return nil, errAuthFailed
 		}
@@ -488,6 +505,10 @@ func isDenied(err error) bool {
 
 func isNotFound(err error) bool {
 	return err != nil && errors.Is(err, gitlab.ErrNotFound)
+}
+
+func isContextError(err error) bool {
+	return err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 
 func webhookHost(rawURL string) string {

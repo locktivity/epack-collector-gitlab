@@ -81,6 +81,52 @@ func TestListProjects_Pagination(t *testing.T) {
 	}
 }
 
+func TestListProjects_LinkHeaderFallback(t *testing.T) {
+	page := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page++
+		if page == 1 {
+			w.Header().Set("Link", `<https://gitlab.com/api/v4/groups/my-group/projects?page=2&per_page=100>; rel="next"`)
+			_ = json.NewEncoder(w).Encode([]Project{{ID: 1, Name: "project-1"}})
+		} else {
+			_ = json.NewEncoder(w).Encode([]Project{{ID: 2, Name: "project-2"}})
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-token")
+	projects, err := c.ListProjects(context.Background(), "my-group")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(projects) != 2 {
+		t.Errorf("expected 2 projects via Link header fallback, got %d", len(projects))
+	}
+}
+
+func TestParseLinkNextPage(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		want   int
+		wantOK bool
+	}{
+		{"valid next", `<https://gitlab.com/api/v4/groups/1/projects?page=3&per_page=100>; rel="next"`, 3, true},
+		{"with other rels", `<https://gitlab.com/api/v4/groups/1/projects?page=1>; rel="first", <https://gitlab.com/api/v4/groups/1/projects?page=2>; rel="next"`, 2, true},
+		{"no next", `<https://gitlab.com/api/v4/groups/1/projects?page=1>; rel="first"`, 0, false},
+		{"empty", "", 0, false},
+		{"malformed url", `<://bad>; rel="next"`, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseLinkNextPage(tt.header)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("parseLinkNextPage(%q) = (%d, %v), want (%d, %v)", tt.header, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestGetGroup_PermissionDenied(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

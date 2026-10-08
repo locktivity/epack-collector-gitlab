@@ -40,7 +40,7 @@ Filters match `name`, not `path_with_namespace`. For example, `backend-*` matche
 
 Project filters apply to project metrics, project inventory, project webhooks, and deploy keys. Group members, group webhooks, runners, and group audit events keep their group scope. The configured group and filter patterns appear in trust output too.
 
-Supply pattern lists as arrays of strings and use valid glob syntax. The current implementation does not reject malformed globs or incorrectly typed list values; an ignored exclusion can broaden collection scope.
+Supply pattern lists as arrays of strings with valid glob syntax. Invalid globs and non-string list entries are rejected before collection begins.
 
 ## Secrets
 

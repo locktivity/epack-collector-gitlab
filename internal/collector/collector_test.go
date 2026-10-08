@@ -881,6 +881,73 @@ func TestInvalidIncludePattern_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestEmptyRepo_NoFalsePositiveBranchProtection(t *testing.T) {
+	client := &fakeClient{
+		group: &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{
+			{ID: 10, Name: "empty-repo", DefaultBranch: "", Visibility: "private"},
+		},
+		protectedBranches: map[int][]gitlab.ProtectedBranch{
+			10: {{Name: "*", AllowForcePush: false,
+				PushAccessLevels: []gitlab.BranchAccessLevel{{AccessLevel: 0}}}},
+		},
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.BranchProtectionRules.MergeRequestRequired != 0 {
+		t.Errorf("empty repo should not get MR required, got %d%%", posture.BranchProtectionRules.MergeRequestRequired)
+	}
+	if posture.Posture.BranchProtectionCoverage != 0 {
+		t.Errorf("empty repo should not count as protected, got %d%%", posture.Posture.BranchProtectionCoverage)
+	}
+}
+
+func TestCancellation_ReturnsError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	client := &fakeClient{
+		group: &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{
+			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private"},
+		},
+		protectedBranches: map[int][]gitlab.ProtectedBranch{},
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	_, err := c.Collect(ctx, componentsdk.LevelTrust)
+	if err == nil {
+		t.Fatal("expected error from canceled context")
+	}
+}
+
+func TestGroupSettings403_ShareWithGroupLock_Unknown(t *testing.T) {
+	client := &fakeClient{
+		groupErr: gitlab.ErrPermissionDenied,
+		projects: []gitlab.Project{
+			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private"},
+		},
+		protectedBranches: map[int][]gitlab.ProtectedBranch{},
+		members:           []gitlab.Member{},
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelAudit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.AccessControl.ShareWithGroupLock != nil {
+		t.Errorf("expected nil ShareWithGroupLock after group 403, got %v", *posture.AccessControl.ShareWithGroupLock)
+	}
+	if posture.AccessControl.ProjectCreationLevel != "" {
+		t.Errorf("expected empty ProjectCreationLevel after group 403, got %s", posture.AccessControl.ProjectCreationLevel)
+	}
+}
+
 func TestAccessLevelName(t *testing.T) {
 	tests := []struct {
 		level    int
