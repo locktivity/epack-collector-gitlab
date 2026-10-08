@@ -85,28 +85,25 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
-
-      - uses: sigstore/cosign-installer@v3
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Prepare and sign release assets
+      - name: Prepare release assets
         run: |
           mkdir -p release
+          # Find and move all binaries and attestations
           find artifacts -type f \( -name "epack-collector-gitlab-*" -o -name "*.intoto.jsonl" \) -exec mv {} release/ \;
+          # Rename .intoto.jsonl to .sigstore.json (epack expects this extension)
           cd release
-          for binary in epack-collector-gitlab-*; do
-            [[ "$binary" == *.intoto.jsonl ]] && continue
-            cosign sign-blob --yes \
-              --bundle "${binary}.sigstore.json" \
-              "$binary"
+          for f in *.intoto.jsonl; do
+            [ -f "$f" ] && mv "$f" "${f%.intoto.jsonl}.sigstore.json"
           done
+          # Create checksums
           sha256sum * > checksums.txt
 
       - name: Create Release
