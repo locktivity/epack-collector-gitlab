@@ -2,31 +2,26 @@
 
 ## Authentication
 
-The collector requires a GitLab access token with `read_api` scope. For audit-level collection, `read_user` scope is also recommended.
+Set `GITLAB_TOKEN` to a group or personal access token with `read_api` scope. A group access token creates its own bot identity; a personal token can belong to a dedicated service account. Assign a role appropriate to the surfaces you need.
 
-### Recommended: Group Access Token
+For a group access token, navigate to your GitLab group > Settings > Access tokens, create the token, and provide it through the `GITLAB_TOKEN` environment variable and the `secrets` entry below. Personal tokens can be created under your GitLab profile's access-token settings.
 
-1. Navigate to your GitLab group > Settings > Access tokens
-2. Create a token with `read_api` scope
-3. Set the token as the `GITLAB_TOKEN` secret in your epack.yaml
-
-### Alternative: Personal Access Token
-
-1. Navigate to your GitLab profile > Access tokens
-2. Create a token with `read_api` and `read_user` scopes
-3. Set the token as the `GITLAB_TOKEN` secret
+The collector does not call the Users API, so it does not require `read_user`. Adding that scope does not make hidden member 2FA fields available.
 
 ## epack.yaml
 
 ```yaml
+stream: myorg/gitlab-posture
+
 collectors:
   gitlab:
     source: locktivity/epack-collector-gitlab@^0.1
     config:
       group: my-organization
-      # base_url: https://gitlab.example.com  # For self-managed instances
-      # include_patterns: ["backend-*"]       # Optional project filtering
-      # exclude_patterns: ["archived-*"]      # Optional project exclusion
+      level: trust
+      # base_url: https://gitlab.example.com
+      # include_patterns: ["backend-*"]
+      # exclude_patterns: ["archived-*"]
     secrets:
       - GITLAB_TOKEN
 ```
@@ -35,20 +30,27 @@ collectors:
 
 | Key | Required | Default | Description |
 |---|---|---|---|
-| `group` | Yes | | GitLab group path (e.g., `my-org`) or numeric ID |
-| `base_url` | No | `https://gitlab.com` | Base URL for self-managed or dedicated instances |
-| `include_patterns` | No | `["*"]` | Glob patterns to filter which projects to include |
-| `exclude_patterns` | No | `[]` | Glob patterns for projects to exclude |
+| `group` | Yes | | Group path, including a subgroup path, or numeric ID supplied as a string |
+| `base_url` | No | `https://gitlab.com` | Instance URL; the collector appends `/api/v4` |
+| `level` | No | `trust` | `trust`, `audit`, or `internal`; unknown values fall back to `trust` with an SDK warning |
+| `include_patterns` | No | `["*"]` | Case-sensitive globs matching project display names |
+| `exclude_patterns` | No | `[]` | Project display-name globs evaluated before includes |
+
+Filters match `name`, not `path_with_namespace`. For example, `backend-*` matches a project named `backend-api`, regardless of its namespace. Projects in subgroups are included; projects shared into the group are excluded. Archived projects are included unless filtered out. Percentages use all included projects as their denominator.
+
+Project filters apply to project metrics, project inventory, project webhooks, and deploy keys. Group members, group webhooks, runners, and group audit events keep their group scope. The configured group and filter patterns appear in trust output too.
+
+Supply pattern lists as arrays of strings and use valid glob syntax. The current implementation does not reject malformed globs or incorrectly typed list values; an ignored exclusion can broaden collection scope.
 
 ## Secrets
 
 | Secret | Required | Description |
 |---|---|---|
-| `GITLAB_TOKEN` | Yes | GitLab access token with `read_api` scope |
+| `GITLAB_TOKEN` | Yes | GitLab access token; never written into the artifacts |
 
-## Self-managed instances
+## Self-managed and Dedicated instances
 
-Set `base_url` to your instance URL. The collector appends `/api/v4/` automatically.
+Set `base_url` to the instance URL, without an `/api/v4` suffix:
 
 ```yaml
 config:
@@ -56,24 +58,22 @@ config:
   base_url: https://gitlab.example.com
 ```
 
-## GitLab Dedicated
+For GitLab Dedicated, use the URL of your dedicated instance in the same way.
 
-Same as self-managed, using your dedicated instance URL:
+## Roles, scopes, and tiers
 
-```yaml
-config:
-  group: my-org
-  base_url: https://mycompany.gitlab-dedicated.com
-```
-
-## Required permissions by tier
-
-Some surfaces require GitLab Premium or Ultimate:
-
-| Surface | Minimum tier | Degradation |
+| Surface | Collection level | Requirements and limitations |
 |---|---|---|
-| Branch protection | Free | Always available |
-| Approval rules | Premium | Diagnostic warning |
-| Group webhooks | Premium | Diagnostic warning |
-| Audit events | Premium | Diagnostic warning |
-| Vulnerability findings | Ultimate | Diagnostic warning |
+| Group settings, projects, branch protection | trust+ | `read_api`; visibility depends on token membership and role |
+| Approval settings and rules | trust+ | Premium+; permissions can vary between the two endpoints |
+| Secret push protection status | trust+ | Ultimate; status is exposed to Developer, Security Manager, Maintainer, or Owner where supported |
+| Members | audit+ | `read_api`; inherited and invited membership follows the API's visibility rules |
+| Member 2FA status | audit+ | API field introduced in GitLab 19.4 and visible to group Owners and administrators; missing values remain `null` |
+| Project webhooks and deploy keys | audit+ | Maintainer or above |
+| Group webhooks | audit+ | Premium+, Owner or administrator |
+| Runners available to the group | audit+ | Current API documentation requires Owner/Auditor or custom `admin_runners`, and `manage_runner` scope |
+| Group audit events | internal | Premium+; Owner for all users' events; Developer/Maintainer can receive only their own events |
+
+Requirements vary with GitLab version. Consult the [Projects API](https://docs.gitlab.com/api/projects/#secret-push-protection-status), [Groups members API](https://docs.gitlab.com/api/group_members/), [Runners API](https://docs.gitlab.com/api/runners/#list-all-of-a-groups-runners), and [Audit events API](https://docs.gitlab.com/api/audit_events/#group-audit-events).
+
+Optional endpoint failures emit diagnostics. HTTP 401 is always fatal; non-permission failures fetching the group or project list are fatal too. A successful response can omit restricted fields without a diagnostic. Group webhook and audit-event HTTP 403 diagnostics currently mention Premium even when the cause is insufficient role. Runner permission diagnostics currently mention Maintainer, although the group-list endpoint has stricter documented requirements.

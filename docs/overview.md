@@ -1,29 +1,44 @@
 # GitLab Collector
 
-The GitLab collector reads the GitLab REST API (v4) for a single top-level group and emits version control system security posture evidence.
+The collector reads the GitLab REST API v4 for a configured group and emits security posture evidence. It includes projects in subgroups and excludes projects shared into the group.
 
 ## What it collects
 
-- Branch protection rules and enforcement across projects
-- Merge request approval rules and settings
-- Security scanning adoption (secret detection, dependency scanning, SAST)
-- Access control posture (2FA enforcement, member roles, project creation policy)
-- Member inventory with roles and 2FA status
-- Project inventory with visibility and protection detail
-- Webhook, deploy key, and runner surfaces
-- Audit events (Premium+ tiers)
+- Default-branch protection and matching wildcard rules
+- Project merge request approval settings and branch-scoped approval rules
+- Secret push protection and the pipeline-required setting
+- Group 2FA enforcement and, at audit+, project-creation policy and sharing lock
+- Group member and project inventories at audit+
+- Webhook counts, deploy-key counts, and available-runner inventory at audit+
+- Webhook hosts, deploy-key details, and seven-day group audit events at internal
+
+It does not inspect repository contents, CI configuration, or CODEOWNERS files. It does not collect SAST/dependency-scanning adoption or vulnerability findings. See [collection levels](levels.md) for the emitted fields and limits.
 
 ## Hosting modes
 
-Works with all GitLab deployment types:
+- **GitLab.com:** default instance URL
+- **Self-managed:** configure `base_url`
+- **GitLab Dedicated:** configure the dedicated instance URL
 
-- **GitLab.com** (SaaS): default, no extra config
-- **Self-managed**: set `base_url` to your instance URL
-- **GitLab Dedicated**: set `base_url` to your dedicated instance URL
+The available fields depend on GitLab version, license, and token permissions.
 
 ## Output
 
-Two artifacts per run:
+Successful runs emit two artifacts at every collection level:
 
-1. `artifacts/gitlab.json`: detailed GitLab-specific posture data
-2. `artifacts/gitlab.vcs-posture.json`: normalized VCS posture following the `evidencepack/vcs-posture@v1` schema
+1. `artifacts/gitlab.json`: detailed GitLab-specific posture
+2. `artifacts/gitlab.vcs-posture.json`: normalized `evidencepack/vcs-posture@v1` posture
+
+The normalized output maps group 2FA, project selection coverage, MR/approval percentages, and pipeline-required percentages from the detailed artifact. `secret_scanning_pct` currently uses secret push protection adoption as a proxy; it does not measure pipeline secret detection.
+
+## Output limitations
+
+Percentages describe the projects visible to the token after filtering. `projects_coverage` is the percentage of API-listed projects selected by the filters, not a measurement of all projects the organization owns. Archived and empty projects remain in the denominator. `security_features_coverage` is the arithmetic mean of secret push protection and pipeline-required coverage, rounded down to an integer.
+
+Pipeline coverage reports the project's `only_allow_merge_if_pipeline_succeeds` flag. It does not inspect pipeline contents or prove that every change ran checks. Code owner coverage reports the branch flag; it does not verify that a CODEOWNERS file exists or covers all paths. Approval inventory records the maximum applicable approval count, not a complete copy of approval rules or approver identities.
+
+The normalized `signed_commits_pct`, `vuln_alerts_pct`, and `code_scanning_pct` are currently fixed at zero because this collector does not measure them. They are not evidence of disabled controls. `unavailable_sources` currently copies detailed diagnostics, so it does not automatically identify these unmeasured metrics. Missing security booleans in successful API responses can also appear as false or zero without diagnostics.
+
+Endpoint failures appear in diagnostics where collection can continue. A failed optional endpoint can lower coverage or counts, and counts of zero can reflect inaccessible data. Inspect diagnostics alongside the metrics. HTTP 401 fails collection at every surface; non-permission errors retrieving the group or project list also fail collection.
+
+Group members, group hooks, runners, and group audit events retain their group scope when projects are filtered. For complete group audit events, use Owner: lower roles can return an apparently successful list containing only the token owner's actions.

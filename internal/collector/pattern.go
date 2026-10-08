@@ -1,6 +1,9 @@
 package collector
 
-import "path/filepath"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 func matchesAny(name string, patterns []string) bool {
 	for _, p := range patterns {
@@ -9,4 +12,13 @@ func matchesAny(name string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+func validatePatterns(patterns []string) error {
+	for _, p := range patterns {
+		if _, err := filepath.Match(p, ""); err != nil {
+			return fmt.Errorf("invalid glob pattern %q: %w", p, err)
+		}
+	}
+	return nil
 }

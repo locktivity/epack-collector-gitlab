@@ -4,6 +4,8 @@
 
 ```yaml
 # epack.yaml
+stream: myorg/gitlab-posture
+
 collectors:
   gitlab:
     source: locktivity/epack-collector-gitlab@^0.1
@@ -15,7 +17,7 @@ collectors:
 
 ```bash
 export GITLAB_TOKEN="glpat-xxxxxxxxxxxxxxxxxxxx"
-epack run
+epack collect
 ```
 
 ## Self-managed instance
@@ -50,8 +52,23 @@ collectors:
 
 ## Audit-level collection
 
+Set the collection level in the collector configuration:
+
+```yaml
+stream: myorg/gitlab-posture
+
+collectors:
+  gitlab:
+    source: locktivity/epack-collector-gitlab@^0.1
+    config:
+      group: my-organization
+      level: audit
+    secrets:
+      - GITLAB_TOKEN
+```
+
 ```bash
-epack run --level audit
+epack collect
 ```
 
 ## Sample trust-level output
@@ -82,12 +99,9 @@ epack run --level audit
   },
   "security_features": {
     "secret_push_protection": 60,
-    "dependency_scanning": 55,
-    "sast": 40
-  },
-  "diagnostics": {
-    "permission_errors": [],
-    "warnings": []
+    "pipeline_required": 84
   }
 }
 ```
+
+This is an illustrative output. `diagnostics` is omitted when there are no warnings or permission errors. The 72% security-features coverage above is the mean of 60% secret push protection and 84% pipeline-required coverage. See [output limitations](overview.md#output-limitations) before interpreting zeros as disabled controls.

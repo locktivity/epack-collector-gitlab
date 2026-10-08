@@ -22,11 +22,21 @@ func main() {
 
 func run(ctx componentsdk.CollectorContext) error {
 	cfg := ctx.Config()
+
+	includePatterns, err := getStringSlice(cfg, "include_patterns")
+	if err != nil {
+		return err
+	}
+	excludePatterns, err := getStringSlice(cfg, "exclude_patterns")
+	if err != nil {
+		return err
+	}
+
 	config := collector.Config{
 		Group:           getString(cfg, "group"),
 		BaseURL:         getString(cfg, "base_url"),
-		IncludePatterns: getStringSlice(cfg, "include_patterns"),
-		ExcludePatterns: getStringSlice(cfg, "exclude_patterns"),
+		IncludePatterns: includePatterns,
+		ExcludePatterns: excludePatterns,
 		OnStatus:        ctx.Status,
 		OnProgress:      ctx.Progress,
 	}
@@ -73,18 +83,25 @@ func getString(cfg map[string]any, key string) string {
 	return ""
 }
 
-func getStringSlice(cfg map[string]any, key string) []string {
+func getStringSlice(cfg map[string]any, key string) ([]string, error) {
 	if cfg == nil {
-		return nil
+		return nil, nil
 	}
-	if v, ok := cfg[key].([]any); ok {
-		result := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				result = append(result, s)
-			}
+	raw, exists := cfg[key]
+	if !exists || raw == nil {
+		return nil, nil
+	}
+	v, ok := raw.([]any)
+	if !ok {
+		return nil, componentsdk.NewConfigError("%s must be a list", key)
+	}
+	result := make([]string, 0, len(v))
+	for i, item := range v {
+		s, ok := item.(string)
+		if !ok {
+			return nil, componentsdk.NewConfigError("%s[%d] must be a string", key, i)
 		}
-		return result
+		result = append(result, s)
 	}
-	return nil
+	return result, nil
 }

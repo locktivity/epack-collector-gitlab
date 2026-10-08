@@ -13,11 +13,11 @@ It collects group-wide posture metrics from the GitLab REST API and emits:
 - **Approval rules:** project-level approval settings and approval rules (Premium+)
 - **Security features:** secret push protection, pipeline-required enforcement
 - **Access control:** 2FA requirement, project creation level, share-with-group lock
-- **Members:** group members with roles, 2FA status, and state (audit+)
+- **Members:** group members with roles and state, plus 2FA status when the API exposes it (audit+)
 - **Projects:** per-project inventory with visibility, branch protection details, and approval settings (audit+)
 - **Webhooks:** group and project webhook counts (audit+), with host/SSL detail (internal)
 - **Deploy keys:** read-write vs read-only counts (audit+, requires Maintainer), per-key fingerprints (internal)
-- **Runners:** group runner inventory with status and tags (audit+)
+- **Runners:** inventory of runners available to the group, with status (audit+); tags are included only if returned by the list endpoint
 - **Audit log:** 7-day audit event summary with action counts (internal)
 
 ## Collection Levels
@@ -26,7 +26,7 @@ The collector accepts an optional `level` config knob (`trust` / `audit` / `inte
 
 | Level | Question it answers | What is in the artifact |
 |---|---|---|
-| `trust` (default) | Do they pass? | Org-wide percentages and on/off flags. No usernames, project names, or webhook URLs. |
+| `trust` (default) | Do they pass? | Group-wide percentages and on/off flags. No collected member or project inventory, or webhook URLs. Configured group and filter patterns are included. |
 | `audit` | Where is the gap? | Per-resource inventories (projects, members, runners, deploy keys) and webhook/deploy-key counts. No webhook destination hosts or audit-log events. |
 | `internal` | Who or what specifically? | Webhook detail rows (host, SSL), deploy key fingerprints, and 7-day audit log events with actor names. |
 
@@ -51,7 +51,7 @@ epack collect
 
 ## Configuration
 
-`group` is required. It should be the group path (e.g., `my-org` or `my-org/sub-group`).
+`group` is required. Use a group path (e.g., `my-org` or `my-org/sub-group`) or a numeric group ID as a string (e.g., `"123"`). Projects in subgroups are included; projects shared into the group are excluded.
 
 Optional config keys:
 
@@ -59,6 +59,8 @@ Optional config keys:
 - `level`: Collection depth. One of `trust`, `audit`, `internal`. Defaults to `trust`.
 - `include_patterns`: List of glob patterns to include projects. Defaults to `["*"]` (all projects).
 - `exclude_patterns`: List of glob patterns to exclude projects. Applied before include patterns.
+
+Patterns are case-sensitive and match the project's display name (`name`), not its path or namespace. Use valid glob syntax. Project filters affect project metrics and inventories; group members, group webhooks, runners, and group audit events retain their group scope.
 
 ```yaml
 collectors:
@@ -83,25 +85,35 @@ The collector uses a GitLab access token (group or personal) passed via the `GIT
 
 ### Recommended setup
 
-Create a **service account** in your GitLab group and generate a group access token with the `read_api` scope. The role you assign determines which surfaces are collected:
+Generate a group access token, or use a personal access token belonging to a dedicated service account, with the `read_api` scope. The role you assign determines which surfaces are collected:
 
 | Role | Surfaces available |
 |---|---|
-| Reporter | Group settings, projects, branches, members |
-| Maintainer | All Reporter surfaces + project webhooks, deploy keys, runners |
-| Owner | All Maintainer surfaces + group webhooks, complete audit events |
+| Reporter | Group settings, projects, branches, members; some security fields may be omitted |
+| Developer | All Reporter surfaces + secret push protection status where exposed (Ultimate) |
+| Maintainer | All Developer surfaces + project webhooks and deploy keys |
+| Owner | All Maintainer surfaces + group webhooks and complete group audit events (Premium+) |
 
-For the most complete collection, invite the service account as **Owner**. For a minimal setup, **Reporter** works but several surfaces will be skipped with diagnostic warnings.
+For the most complete collection, use **Owner**. For a minimal setup, **Reporter** works but several surfaces will be skipped with diagnostic warnings. Missing fields within successful API responses may not produce warnings; see [output limitations](docs/overview.md#output-limitations).
+
+The group-runner list endpoint has separate requirements: GitLab currently documents **Owner** or **Auditor** (or a custom role with `admin_runners`), plus `manage_runner` scope. `read_api` alone should not be assumed to cover runners. See the [GitLab Runners API](https://docs.gitlab.com/api/runners/#list-all-of-a-groups-runners); requirements can differ on older self-managed versions.
 
 ### Required token scope
 
 | Scope | What it covers |
 |---|---|
-| `read_api` | All collector surfaces (group, projects, branches, members, webhooks, deploy keys, runners, audit events) |
+| `read_api` | Group, projects, branches, members, webhooks, deploy keys, audit events, subject to role and tier |
+| `manage_runner` | Additional scope documented for the group-runner endpoint; requires an appropriate role |
 
-If a surface is inaccessible due to insufficient role or tier requirements (e.g., audit events require Premium), the collector emits a diagnostic warning and continues. It does not fail the run unless the token itself is invalid (401).
+Optional surface failures emit diagnostics and collection continues. Any API response with HTTP 401 fails the run. Non-permission failures fetching the group or project list also fail the run. Successful responses can still be incomplete: for example, a Developer or Maintainer sees only their own group audit events. Use Owner for a group-wide audit summary. See [configuration](docs/configuration.md) for field visibility and tier requirements.
 
 ## Development
+
+Use the Go toolchain pinned in `go.mod`. SDK commands require an epack build with component support. Install the matching conformance runner before `make sdk-test`:
+
+```bash
+go install -tags conformance github.com/locktivity/epack/cmd/epack-conformance@"$(go list -m -f '{{.Version}}' github.com/locktivity/epack)"
+```
 
 ```bash
 # Build

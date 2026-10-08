@@ -34,7 +34,7 @@ type Project struct {
 	OnlyAllowMergeIfAllDiscussionsResolved  bool       `json:"only_allow_merge_if_all_discussions_are_resolved"`
 	MergeMethod                             string     `json:"merge_method"`
 	ApprovalsBeforeMerge                    int        `json:"approvals_before_merge"`
-	SecretPushProtectionEnabled             bool       `json:"secret_push_protection_enabled"`
+	SecretPushProtectionEnabled             *bool      `json:"secret_push_protection_enabled"`
 	RemoveSourceBranchAfterMerge            bool       `json:"remove_source_branch_after_merge"`
 	ForksCount                              int        `json:"forks_count"`
 	StarCount                               int        `json:"star_count"`
@@ -65,6 +65,7 @@ type BranchAccessLevel struct {
 	DeployKeyID        *int   `json:"deploy_key_id"`
 	UserID             *int   `json:"user_id"`
 	GroupID            *int   `json:"group_id"`
+	MemberRoleID       *int   `json:"member_role_id"`
 }
 
 // ApprovalSettings represents project-level approval configuration.

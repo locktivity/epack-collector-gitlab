@@ -37,7 +37,11 @@ type VCSPostureSecurityFeatures struct {
 func (g *GroupPosture) ToVCSPosture() *VCSPosture {
 	twoFA := g.AccessControl.TwoFactorRequired != nil && *g.AccessControl.TwoFactorRequired
 
-	var unavailable []string
+	unavailable := []string{
+		"signed_commits: not available via GitLab API",
+		"vuln_alerts: requires Ultimate tier; not collected",
+		"code_scanning: SAST configuration not queryable via GitLab REST API",
+	}
 	if g.Diagnostics != nil {
 		unavailable = append(unavailable, g.Diagnostics.PermissionErrors...)
 		unavailable = append(unavailable, g.Diagnostics.Warnings...)
@@ -56,12 +60,12 @@ func (g *GroupPosture) ToVCSPosture() *VCSPosture {
 			PRRequiredPct:       float64(g.BranchProtectionRules.MergeRequestRequired),
 			ApprovingReviewsPct: float64(g.BranchProtectionRules.ApprovingReviews),
 			StatusChecksPct:     float64(g.SecurityFeatures.PipelineRequired),
-			SignedCommitsPct:    0, // GitLab does not have a per-project signed-commits setting
+			SignedCommitsPct:    0,
 		},
 		SecurityFeatures: VCSPostureSecurityFeatures{
-			VulnAlertsPct:     0, // Requires Ultimate; populated when available
+			VulnAlertsPct:     0,
 			SecretScanningPct: float64(g.SecurityFeatures.SecretPushProtection), // LINT-ALLOW: coverage percentage, not a secret value
-			CodeScanningPct:   0, // SAST config lives in .gitlab-ci.yml, not queryable via REST
+			CodeScanningPct:   0,
 		},
 		UnavailableSources: unavailable,
 	}

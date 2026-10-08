@@ -130,7 +130,7 @@ func TestCollect_TrustLevel_BasicPosture(t *testing.T) {
 			RequireTwoFactorAuthentication: true,
 		},
 		projects: []gitlab.Project{
-			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private", SecretPushProtectionEnabled: true, OnlyAllowMergeIfPipelineSucceeds: true},
+			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private", SecretPushProtectionEnabled: boolPtr(true), OnlyAllowMergeIfPipelineSucceeds: true},
 			{ID: 11, Name: "project-b", DefaultBranch: "main", Visibility: "public"},
 		},
 		protectedBranches: map[int][]gitlab.ProtectedBranch{
@@ -752,6 +752,132 @@ func TestFatalError_DoesNotLeakBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "HTTP 500") {
 		t.Errorf("expected sanitized HTTP 500, got: %v", err)
+	}
+}
+
+func intPtr(n int) *int { return &n }
+
+func TestIsMRRequired_CustomRoleGrant(t *testing.T) {
+	levels := []gitlab.BranchAccessLevel{
+		{AccessLevel: 0, MemberRoleID: intPtr(42)},
+	}
+	if isMRRequired(levels) {
+		t.Error("custom-role push grant should not be treated as 'No one'")
+	}
+}
+
+func TestIsMRRequired_MixedCustomRoleAndNoOne(t *testing.T) {
+	levels := []gitlab.BranchAccessLevel{
+		{AccessLevel: 0},
+		{AccessLevel: 0, MemberRoleID: intPtr(7)},
+	}
+	if isMRRequired(levels) {
+		t.Error("mixed grants with custom role should allow direct push")
+	}
+}
+
+func TestSecretPushProtection_NilNotCountedAsDisabled(t *testing.T) {
+	client := &fakeClient{
+		group: &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{
+			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private", SecretPushProtectionEnabled: boolPtr(true)},
+			{ID: 11, Name: "project-b", DefaultBranch: "main", Visibility: "private"},
+		},
+		protectedBranches: map[int][]gitlab.ProtectedBranch{},
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.SecurityFeatures.SecretPushProtection != 50 {
+		t.Errorf("expected 50%% secret push protection, got %d", posture.SecurityFeatures.SecretPushProtection)
+	}
+	if posture.Diagnostics == nil {
+		t.Fatal("expected diagnostics when secret push protection status is unknown for some projects")
+	}
+	found := false
+	for _, w := range posture.Diagnostics.Warnings {
+		if strings.Contains(w, "secret_push_protection") && strings.Contains(w, "1 of 2") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected diagnostic about unknown secret push protection, got: %v", posture.Diagnostics.Warnings)
+	}
+}
+
+func TestGroupSettings403_LeavesAccessControlUnknown(t *testing.T) {
+	client := &fakeClient{
+		groupErr: gitlab.ErrPermissionDenied,
+		projects: []gitlab.Project{},
+	}
+
+	c := New(Config{Group: "test-group"}, client)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.AccessControl.TwoFactorRequired != nil {
+		t.Errorf("expected nil TwoFactorRequired after group 403, got %v", *posture.AccessControl.TwoFactorRequired)
+	}
+}
+
+func TestToVCSPosture_StaticUnavailableMarkers(t *testing.T) {
+	posture := &GroupPosture{
+		Group: "test-group",
+		Scope: Scope{ProjectsCoverage: 100},
+		AccessControl: AccessControl{
+			TwoFactorRequired: boolPtr(true),
+		},
+	}
+
+	vcs := posture.ToVCSPosture()
+	expectedMarkers := []string{"signed_commits", "vuln_alerts", "code_scanning"}
+	for _, marker := range expectedMarkers {
+		found := false
+		for _, u := range vcs.UnavailableSources {
+			if strings.Contains(u, marker) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected unavailable marker for %s, got: %v", marker, vcs.UnavailableSources)
+		}
+	}
+}
+
+func TestInvalidExcludePattern_ReturnsError(t *testing.T) {
+	client := &fakeClient{
+		group:    &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{},
+	}
+
+	c := New(Config{Group: "test-group", ExcludePatterns: []string{"["}}, client)
+	_, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err == nil {
+		t.Fatal("expected error for invalid exclude pattern")
+	}
+	if !strings.Contains(err.Error(), "exclude_patterns") {
+		t.Errorf("expected exclude_patterns in error, got: %v", err)
+	}
+}
+
+func TestInvalidIncludePattern_ReturnsError(t *testing.T) {
+	client := &fakeClient{
+		group:    &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{},
+	}
+
+	c := New(Config{Group: "test-group", IncludePatterns: []string{"[bad"}}, client)
+	_, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err == nil {
+		t.Fatal("expected error for invalid include pattern")
+	}
+	if !strings.Contains(err.Error(), "include_patterns") {
+		t.Errorf("expected include_patterns in error, got: %v", err)
 	}
 }
 

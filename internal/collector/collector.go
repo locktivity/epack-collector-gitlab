@@ -69,12 +69,20 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 		excludePatterns = []string{}
 	}
 
+	if err := validatePatterns(includePatterns); err != nil {
+		return nil, fmt.Errorf("include_patterns: %w", err)
+	}
+	if err := validatePatterns(excludePatterns); err != nil {
+		return nil, fmt.Errorf("exclude_patterns: %w", err)
+	}
+
 	posture := NewGroupPosture(c.config.Group)
 	posture.CollectedAtLevel = string(level)
 	diag := &diagnosticsTracker{}
 
 	c.status(fmt.Sprintf("Connecting to GitLab group %s...", c.config.Group))
 
+	groupSettingsAvailable := true
 	group, err := c.client.GetGroup(ctx, c.config.Group)
 	if err != nil {
 		if isUnauthorized(err) {
@@ -82,6 +90,7 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 		}
 		if isDenied(err) {
 			diag.surfacePermissionDenied("group_settings", "permission denied (requires read_api scope)")
+			groupSettingsAvailable = false
 			group = &gitlab.Group{}
 		} else {
 			return nil, fmt.Errorf("fetching group: %s", safeDiagError(err))
@@ -121,7 +130,7 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 		return nil, err
 	}
 
-	c.populatePosture(posture, group, metrics, included, includePatterns, excludePatterns, len(allProjects))
+	c.populatePosture(posture, group, metrics, included, includePatterns, excludePatterns, len(allProjects), groupSettingsAvailable, diag)
 
 	if err := c.collectSurfaces(ctx, posture, group, included, metrics, level, diag); err != nil {
 		return nil, err
@@ -134,15 +143,16 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 }
 
 type projectMetrics struct {
-	branchProtected    int
-	mergeRestricted    int
-	approvingReviews   int
-	codeOwnerApproval  int
-	noForcePush        int
-	secretPushProt     int
-	pipelineRequired   int
-	branchProtections  map[int]*BranchProtectionDetail
-	approvalDetails    map[int]*ApprovalDetail
+	branchProtected      int
+	mergeRestricted      int
+	approvingReviews     int
+	codeOwnerApproval    int
+	noForcePush          int
+	secretPushProt       int
+	secretPushProtUnknown int
+	pipelineRequired     int
+	branchProtections    map[int]*BranchProtectionDetail
+	approvalDetails      map[int]*ApprovalDetail
 }
 
 func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Project, level componentsdk.Level, diag *diagnosticsTracker) (*projectMetrics, error) {
@@ -155,8 +165,12 @@ func (c *Collector) computeMetrics(ctx context.Context, projects []gitlab.Projec
 	for i, proj := range projects {
 		c.progress(int64(i+1), total, fmt.Sprintf("Analyzing %s", proj.Name))
 
-		if proj.SecretPushProtectionEnabled { // LINT-ALLOW: boolean setting, not a secret value
-			m.secretPushProt++
+		if proj.SecretPushProtectionEnabled != nil { // LINT-ALLOW: boolean setting, not a secret value
+			if *proj.SecretPushProtectionEnabled { // LINT-ALLOW: boolean setting, not a secret value
+				m.secretPushProt++
+			}
+		} else {
+			m.secretPushProtUnknown++
 		}
 		if proj.OnlyAllowMergeIfPipelineSucceeds {
 			m.pipelineRequired++
@@ -387,9 +401,9 @@ func isPushRestricted(levels []gitlab.BranchAccessLevel) bool {
 // isMRRequired returns true when no one can push directly to the branch,
 // meaning all changes must go through a merge request.
 //
-// GitLab sets access_level=0 with no user/group/deploy_key grants to mean
-// "No one". If any level > 0 exists, or any individual user/group/deploy_key
-// grant exists, direct push is possible.
+// GitLab sets access_level=0 with no user/group/deploy_key/member_role grants
+// to mean "No one". If any level > 0 exists, or any individual grant exists
+// (user, group, deploy key, or custom member role), direct push is possible.
 func isMRRequired(levels []gitlab.BranchAccessLevel) bool {
 	if len(levels) == 0 {
 		return false
@@ -398,17 +412,19 @@ func isMRRequired(levels []gitlab.BranchAccessLevel) bool {
 		if pal.AccessLevel > 0 {
 			return false
 		}
-		if pal.UserID != nil || pal.GroupID != nil || pal.DeployKeyID != nil {
+		if pal.UserID != nil || pal.GroupID != nil || pal.DeployKeyID != nil || pal.MemberRoleID != nil {
 			return false
 		}
 	}
 	return true
 }
 
-func (c *Collector) populatePosture(posture *GroupPosture, group *gitlab.Group, metrics *projectMetrics, included []gitlab.Project, includePatterns, excludePatterns []string, totalProjects int) {
-	twoFA := group.RequireTwoFactorAuthentication
-	posture.AccessControl = AccessControl{
-		TwoFactorRequired: &twoFA,
+func (c *Collector) populatePosture(posture *GroupPosture, group *gitlab.Group, metrics *projectMetrics, included []gitlab.Project, includePatterns, excludePatterns []string, totalProjects int, groupSettingsAvailable bool, diag *diagnosticsTracker) {
+	if groupSettingsAvailable {
+		twoFA := group.RequireTwoFactorAuthentication
+		posture.AccessControl = AccessControl{
+			TwoFactorRequired: &twoFA,
+		}
 	}
 
 	total := len(included)
@@ -433,6 +449,11 @@ func (c *Collector) populatePosture(posture *GroupPosture, group *gitlab.Group, 
 	posture.SecurityFeatures = SecurityFeatures{
 		SecretPushProtection: percent(metrics.secretPushProt, total),
 		PipelineRequired:    percent(metrics.pipelineRequired, total),
+	}
+
+	if metrics.secretPushProtUnknown > 0 {
+		diag.surfaceUnavailable("secret_push_protection",
+			fmt.Sprintf("%d of %d projects did not report secret push protection status (may require Ultimate tier or Maintainer role)", metrics.secretPushProtUnknown, total))
 	}
 }
 
