@@ -3,110 +3,179 @@ package gitlab
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"math"
-	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/locktivity/epack/componentsdk"
 )
 
 const (
-	defaultBaseURL = "https://gitlab.com"
+	// DefaultBaseURL is the instance the collector reads when base_url is
+	// not set.
+	DefaultBaseURL = "https://gitlab.com"
 	apiPrefix      = "/api/v4"
-	requestTimeout = 30 * time.Second
-	maxAttempts    = 5
+	graphqlPath    = "/api/graphql"
 	maxPerPage     = 100
+	maxErrorBody   = 64 << 10
 )
 
-var retryableStatuses = map[int]bool{
-	http.StatusTooManyRequests:     true,
-	http.StatusInternalServerError: true,
-	http.StatusBadGateway:          true,
-	http.StatusServiceUnavailable:  true,
-	http.StatusGatewayTimeout:      true,
-}
-
-var (
-	ErrUnauthorized       = fmt.Errorf("unauthorized")
-	ErrPermissionDenied   = fmt.Errorf("permission denied")
-	ErrNotFound           = fmt.Errorf("not found")
-	ErrFeatureUnavailable = fmt.Errorf("feature unavailable")
-)
-
-type APIError struct {
-	StatusCode int
-	Body       string
-}
-
-func (e *APIError) Error() string {
-	return fmt.Sprintf("gitlab API error: status %d: %s", e.StatusCode, e.Body)
-}
-
-func (e *APIError) Unwrap() error {
-	switch e.StatusCode {
-	case http.StatusUnauthorized:
-		return ErrUnauthorized
-	case http.StatusForbidden:
-		return ErrPermissionDenied
-	case http.StatusNotFound:
-		return ErrNotFound
-	}
-	return nil
-}
-
-// Client is a GitLab REST API client.
+// Client is a GitLab REST and GraphQL API client. Each method is one named
+// operation in the collector result.
 type Client struct {
 	baseURL    string
+	graphqlURL string
 	token      string
 	httpClient *http.Client
 }
 
-// NewClient creates a new GitLab API client.
-func NewClient(baseURL, token string) *Client {
+// The operations the collector names its calls with.
+const (
+	opGroup               = "gitlab.groups.get"
+	opProjects            = "gitlab.projects.list"
+	opProtectedBranches   = "gitlab.protected_branches.list"
+	opApprovalSettings    = "gitlab.approval_settings.get"
+	opApprovalRules       = "gitlab.approval_rules.list"
+	opGroupMembers        = "gitlab.group_members.list"
+	opBillableMembers     = "gitlab.billable_members.list"
+	opGroupHooks          = "gitlab.group_hooks.list"
+	opProjectHooks        = "gitlab.project_hooks.list"
+	opDeployKeys          = "gitlab.deploy_keys.list"
+	opGroupRunners        = "gitlab.group_runners.list"
+	opGroupAuditEvents    = "gitlab.group_audit_events.list"
+	opGroupAccessTokens   = "gitlab.group_access_tokens.list"
+	opProjectAccessTokens = "gitlab.project_access_tokens.list"
+)
+
+// scopeReadAPI is the token scope every call needs. GitLab's docs give no
+// role for a call whose permission is this scope.
+const scopeReadAPI = "read_api"
+
+// permissions names the token scope or the GitLab role each operation needs,
+// as GitLab's API docs give it. The collector result lists it with the
+// operation, and a gap from the call's denial names it.
+var permissions = map[string]string{
+	opGroup:               scopeReadAPI,
+	opProjects:            scopeReadAPI,
+	opProtectedBranches:   scopeReadAPI,
+	opApprovalSettings:    scopeReadAPI,
+	opApprovalRules:       scopeReadAPI,
+	opGroupMembers:        scopeReadAPI,
+	opBillableMembers:     "Owner",
+	opGroupHooks:          "Owner",
+	opProjectHooks:        "Maintainer",
+	opDeployKeys:          "Maintainer",
+	opGroupRunners:        "Owner",
+	opGroupAuditEvents:    "Owner",
+	opGroupAccessTokens:   "Owner",
+	opProjectAccessTokens: "Maintainer",
+	opSecurityScanners:    scopeReadAPI,
+	opVulnerabilities:     "Developer",
+}
+
+// roleDeniedStatus gives the status an operation gets when the token lacks
+// the role it needs, where that status is not 403. The access token lists
+// answer 401, and the sign-in already showed that the token works. The
+// billable members list answers 400, and the collector does not call it for
+// a subgroup, its only other 400.
+var roleDeniedStatus = map[string]int{
+	opGroupAccessTokens:   http.StatusUnauthorized,
+	opProjectAccessTokens: http.StatusUnauthorized,
+	opBillableMembers:     http.StatusBadRequest,
+}
+
+// ClassifyResponse reads the status in roleDeniedStatus as
+// permission_denied, for componentsdk.HTTPOptions.ClassifyResponse. The
+// collector result then counts the call's error as permission_denied, and
+// its gap names the operation's permission.
+func ClassifyResponse(resp *http.Response, _ []byte) (componentsdk.Code, bool) {
+	if op, ok := operationOf(resp); ok && roleDenied(op.Name, resp.StatusCode) {
+		return componentsdk.CodePermissionDenied, true
+	}
+	return "", false
+}
+
+// NamesPermission reports whether a denial shows that the token lacks the
+// call's permission, for componentsdk.HTTPOptions.NamesPermission. GitLab
+// answers a token without a scope the call needs with insufficient_scope.
+// So a scope is named only on that answer, and a role only on any other.
+func NamesPermission(resp *http.Response, body []byte) bool {
+	op, ok := operationOf(resp)
+	if !ok {
+		return false
+	}
+	var payload struct {
+		Error any `json:"error"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	code, _ := payload.Error.(string)
+	return (code == "insufficient_scope") == (op.Permission == scopeReadAPI)
+}
+
+func operationOf(resp *http.Response) (componentsdk.Operation, bool) {
+	if resp == nil || resp.Request == nil {
+		return componentsdk.Operation{}, false
+	}
+	return componentsdk.OperationOf(resp.Request.Context())
+}
+
+func roleDenied(op string, status int) bool {
+	want, ok := roleDeniedStatus[op]
+	return ok && status == want
+}
+
+// NewClient returns a client for the instance at baseURL, or GitLab.com when
+// baseURL is empty. It sends token in the PRIVATE-TOKEN header through
+// httpClient, which retries safe requests and keeps the token on the hosts it
+// was built for and off plain http.
+func NewClient(httpClient *http.Client, baseURL, token string) *Client {
 	if baseURL == "" {
-		baseURL = defaultBaseURL
+		baseURL = DefaultBaseURL
 	}
-	baseURL = strings.TrimRight(baseURL, "/")
-
-	origin, _ := url.Parse(baseURL)
-
+	root := strings.TrimRight(baseURL, "/")
 	return &Client{
-		baseURL: baseURL + apiPrefix,
-		token:   token,
-		httpClient: &http.Client{
-			Timeout: requestTimeout,
-			CheckRedirect: sameOriginRedirect(origin),
-		},
+		baseURL:    root + apiPrefix,
+		graphqlURL: root + graphqlPath,
+		token:      token,
+		httpClient: httpClient,
 	}
 }
 
-// sameOriginRedirect returns a CheckRedirect function that only follows
-// redirects to the same scheme+host as the original request. This prevents
-// the PRIVATE-TOKEN header from leaking to a different server.
-func sameOriginRedirect(origin *url.URL) func(*http.Request, []*http.Request) error {
-	return func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 10 {
-			return fmt.Errorf("too many redirects")
-		}
-		if req.URL.Scheme == "http" && origin.Scheme == "https" {
-			return fmt.Errorf("refusing HTTPS-to-HTTP downgrade redirect to %s", req.URL.Host)
-		}
-		if !strings.EqualFold(req.URL.Host, origin.Host) {
-			return fmt.Errorf("refusing cross-origin redirect from %s to %s", origin.Host, req.URL.Host)
-		}
-		return nil
+// Host returns the host of the instance at baseURL, or of GitLab.com when
+// baseURL is empty. It is the only host that may receive the token. The SDK's
+// client never sends the token over plain http except to a loopback host, so
+// any other http URL is refused here as configuration.
+func Host(baseURL string) (string, error) {
+	if baseURL == "" {
+		baseURL = DefaultBaseURL
 	}
+	u, err := url.Parse(baseURL)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" {
+		return "", fmt.Errorf("%q is not an http or https URL, such as https://gitlab.example.com", baseURL)
+	}
+	host := strings.ToLower(u.Hostname())
+	if u.Scheme == "http" && !loopback(host) {
+		return "", fmt.Errorf("%q uses plain http, which would send the token in clear text; use https", baseURL)
+	}
+	return host, nil
 }
 
-// GetGroup fetches group details.
+func loopback(host string) bool {
+	ip := net.ParseIP(host)
+	return host == "localhost" || (ip != nil && ip.IsLoopback())
+}
+
+// GetGroup fetches group details. The collector signs in with this call.
 func (c *Client) GetGroup(ctx context.Context, groupID string) (*Group, error) {
-	path := fmt.Sprintf("/groups/%s", url.PathEscape(groupID))
 	var group Group
-	if err := c.get(ctx, path, nil, &group); err != nil {
+	if _, err := c.get(ctx, opGroup, "/groups/"+url.PathEscape(groupID), nil, &group); err != nil {
 		return nil, err
 	}
 	return &group, nil
@@ -114,168 +183,184 @@ func (c *Client) GetGroup(ctx context.Context, groupID string) (*Group, error) {
 
 // ListProjects lists all projects in a group, including subgroups.
 func (c *Client) ListProjects(ctx context.Context, groupID string) ([]Project, error) {
-	path := fmt.Sprintf("/groups/%s/projects", url.PathEscape(groupID))
 	params := url.Values{
 		"include_subgroups": {"true"},
 		"with_shared":       {"false"},
-		"per_page":          {strconv.Itoa(maxPerPage)},
 	}
-
-	var all []Project
-	return all, c.paginate(ctx, path, params, &all)
+	return listAll[Project](ctx, c, opProjects, "/groups/"+url.PathEscape(groupID)+"/projects", params)
 }
 
 // ListProtectedBranches lists protected branches for a project.
 func (c *Client) ListProtectedBranches(ctx context.Context, projectID int) ([]ProtectedBranch, error) {
-	path := fmt.Sprintf("/projects/%d/protected_branches", projectID)
-	params := url.Values{"per_page": {strconv.Itoa(maxPerPage)}}
-
-	var all []ProtectedBranch
-	return all, c.paginate(ctx, path, params, &all)
+	return listAll[ProtectedBranch](ctx, c, opProtectedBranches, fmt.Sprintf("/projects/%d/protected_branches", projectID), url.Values{})
 }
 
-// GetApprovalSettings fetches project-level approval configuration.
+// GetApprovalSettings fetches project-level approval configuration
+// (Premium+). A response without the settings the collector reads is an
+// invalid response.
 func (c *Client) GetApprovalSettings(ctx context.Context, projectID int) (*ApprovalSettings, error) {
-	path := fmt.Sprintf("/projects/%d/approvals", projectID)
-	var settings ApprovalSettings
-	if err := c.get(ctx, path, nil, &settings); err != nil {
+	const op = opApprovalSettings
+	var wire struct {
+		ApprovalsBeforeMerge                   *int  `json:"approvals_before_merge"`
+		ResetApprovalsOnPush                   *bool `json:"reset_approvals_on_push"`
+		DisableOverridingApproversPerMR        bool  `json:"disable_overriding_approvers_per_merge_request"`
+		MergeRequestsAuthorApproval            bool  `json:"merge_requests_author_approval"`
+		MergeRequestsDisableCommittersApproval *bool `json:"merge_requests_disable_committers_approval"`
+	}
+	resp, err := c.get(ctx, op, fmt.Sprintf("/projects/%d/approvals", projectID), nil, &wire)
+	if err != nil {
 		return nil, err
 	}
-	return &settings, nil
+	if wire.ApprovalsBeforeMerge == nil || wire.ResetApprovalsOnPush == nil || wire.MergeRequestsDisableCommittersApproval == nil {
+		return nil, componentsdk.ResponseError(resp, invalidResponse(op, "lacks approvals_before_merge, reset_approvals_on_push, or merge_requests_disable_committers_approval"))
+	}
+	return &ApprovalSettings{
+		ApprovalsBeforeMerge:                   *wire.ApprovalsBeforeMerge,
+		ResetApprovalsOnPush:                   *wire.ResetApprovalsOnPush,
+		DisableOverridingApproversPerMR:        wire.DisableOverridingApproversPerMR,
+		MergeRequestsAuthorApproval:            wire.MergeRequestsAuthorApproval,
+		MergeRequestsDisableCommittersApproval: *wire.MergeRequestsDisableCommittersApproval,
+	}, nil
 }
 
 // ListApprovalRules lists project-level approval rules (Premium+).
 func (c *Client) ListApprovalRules(ctx context.Context, projectID int) ([]ApprovalRule, error) {
-	path := fmt.Sprintf("/projects/%d/approval_rules", projectID)
-	params := url.Values{"per_page": {strconv.Itoa(maxPerPage)}}
-
-	var all []ApprovalRule
-	return all, c.paginate(ctx, path, params, &all)
+	return listAll[ApprovalRule](ctx, c, opApprovalRules, fmt.Sprintf("/projects/%d/approval_rules", projectID), url.Values{})
 }
 
 // ListGroupMembers lists all members of a group (including inherited).
 func (c *Client) ListGroupMembers(ctx context.Context, groupID string) ([]Member, error) {
-	path := fmt.Sprintf("/groups/%s/members/all", url.PathEscape(groupID))
-	params := url.Values{"per_page": {strconv.Itoa(maxPerPage)}}
+	return listAll[Member](ctx, c, opGroupMembers, "/groups/"+url.PathEscape(groupID)+"/members/all", url.Values{})
+}
 
-	var all []Member
-	return all, c.paginate(ctx, path, params, &all)
+// ListBillableMembers lists the billable members of a top-level group,
+// with the date of each one's last activity. Only the group's Owners can
+// list them. GitLab answers 400 for a subgroup or for another role.
+func (c *Client) ListBillableMembers(ctx context.Context, groupID string) ([]BillableMember, error) {
+	return listAll[BillableMember](ctx, c, opBillableMembers, "/groups/"+url.PathEscape(groupID)+"/billable_members", url.Values{})
 }
 
 // ListGroupWebhooks lists webhooks for a group (Premium+).
 func (c *Client) ListGroupWebhooks(ctx context.Context, groupID string) ([]Webhook, error) {
-	path := fmt.Sprintf("/groups/%s/hooks", url.PathEscape(groupID))
-	params := url.Values{"per_page": {strconv.Itoa(maxPerPage)}}
-
-	var all []Webhook
-	return all, c.paginate(ctx, path, params, &all)
+	return listAll[Webhook](ctx, c, opGroupHooks, "/groups/"+url.PathEscape(groupID)+"/hooks", url.Values{})
 }
 
 // ListProjectWebhooks lists webhooks for a project.
 func (c *Client) ListProjectWebhooks(ctx context.Context, projectID int) ([]Webhook, error) {
-	path := fmt.Sprintf("/projects/%d/hooks", projectID)
-	params := url.Values{"per_page": {strconv.Itoa(maxPerPage)}}
-
-	var all []Webhook
-	return all, c.paginate(ctx, path, params, &all)
+	return listAll[Webhook](ctx, c, opProjectHooks, fmt.Sprintf("/projects/%d/hooks", projectID), url.Values{})
 }
 
 // ListProjectDeployKeys lists deploy keys for a project.
 func (c *Client) ListProjectDeployKeys(ctx context.Context, projectID int) ([]DeployKey, error) {
-	path := fmt.Sprintf("/projects/%d/deploy_keys", projectID)
-	params := url.Values{"per_page": {strconv.Itoa(maxPerPage)}}
-
-	var all []DeployKey
-	return all, c.paginate(ctx, path, params, &all)
+	return listAll[DeployKey](ctx, c, opDeployKeys, fmt.Sprintf("/projects/%d/deploy_keys", projectID), url.Values{})
 }
 
-// ListGroupRunners lists runners for a group.
-func (c *Client) ListGroupRunners(ctx context.Context, groupID string) ([]Runner, error) {
-	path := fmt.Sprintf("/groups/%s/runners", url.PathEscape(groupID))
-	params := url.Values{"per_page": {strconv.Itoa(maxPerPage)}}
+// ListGroupAccessTokens lists the group's active access tokens. Only the
+// group's Owners can list them. On versions without the state filter the
+// list has inactive tokens too, and the collector leaves them out.
+func (c *Client) ListGroupAccessTokens(ctx context.Context, groupID string) ([]AccessToken, error) {
+	params := url.Values{"state": {"active"}}
+	return listAll[AccessToken](ctx, c, opGroupAccessTokens, "/groups/"+url.PathEscape(groupID)+"/access_tokens", params)
+}
 
-	var all []Runner
-	return all, c.paginate(ctx, path, params, &all)
+// ListProjectAccessTokens lists a project's active access tokens. The
+// project's Maintainers and Owners can list them.
+func (c *Client) ListProjectAccessTokens(ctx context.Context, projectID int) ([]AccessToken, error) {
+	params := url.Values{"state": {"active"}}
+	return listAll[AccessToken](ctx, c, opProjectAccessTokens, fmt.Sprintf("/projects/%d/access_tokens", projectID), params)
+}
+
+// ListGroupRunners lists the group runners of a group and its ancestor
+// groups. Without the type filter, the list also has instance runners.
+func (c *Client) ListGroupRunners(ctx context.Context, groupID string) ([]Runner, error) {
+	params := url.Values{"type": {"group_type"}}
+	return listAll[Runner](ctx, c, opGroupRunners, "/groups/"+url.PathEscape(groupID)+"/runners", params)
 }
 
 // ListGroupAuditEvents lists audit events for a group (Premium+).
 func (c *Client) ListGroupAuditEvents(ctx context.Context, groupID string, since time.Time) ([]AuditEvent, error) {
-	path := fmt.Sprintf("/groups/%s/audit_events", url.PathEscape(groupID))
-	params := url.Values{
-		"per_page":      {strconv.Itoa(maxPerPage)},
-		"created_after": {since.Format(time.RFC3339)},
-	}
-
-	var all []AuditEvent
-	return all, c.paginate(ctx, path, params, &all)
+	params := url.Values{"created_after": {since.UTC().Format(time.RFC3339)}}
+	return listAll[AuditEvent](ctx, c, opGroupAuditEvents, "/groups/"+url.PathEscape(groupID)+"/audit_events", params)
 }
 
-// ListVulnerabilityFindings lists vulnerability findings for a project (Ultimate).
-func (c *Client) ListVulnerabilityFindings(ctx context.Context, projectID int) ([]VulnerabilityFinding, error) {
-	path := fmt.Sprintf("/projects/%d/vulnerability_findings", projectID)
-	params := url.Values{
-		"per_page": {strconv.Itoa(maxPerPage)},
-		"scope":    {"all"},
+// get sends one named GET and decodes a 200 response into dest. Any other
+// status returns an *APIError. The SDK's transport retries the call when
+// that is safe. It returns the response for componentsdk.ResponseError and
+// the paging headers. The response's body is closed.
+func (c *Client) get(ctx context.Context, op, path string, params url.Values, dest any) (*http.Response, error) {
+	ctx = componentsdk.WithOperation(ctx, componentsdk.Operation{Name: op, Permission: permissions[op]})
+	u := c.baseURL + path
+	if len(params) > 0 {
+		u += "?" + params.Encode()
 	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("PRIVATE-TOKEN", c.token)
 
-	var all []VulnerabilityFinding
-	return all, c.paginate(ctx, path, params, &all)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if err := decode(op, req, resp, dest); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
-// get performs a single GET request with retry.
-func (c *Client) get(ctx context.Context, path string, params url.Values, target any) error {
-	var lastErr error
-	for attempt := range maxAttempts {
-		resp, err := c.doRequest(ctx, path, params)
-		if err != nil {
-			return err
-		}
-
-		if resp.StatusCode == http.StatusOK {
-			defer func() { _ = resp.Body.Close() }()
-			return json.NewDecoder(resp.Body).Decode(target)
-		}
-
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-
-		apiErr := &APIError{StatusCode: resp.StatusCode, Body: string(body)}
-		if !retryableStatuses[resp.StatusCode] {
-			return apiErr
-		}
-
-		lastErr = apiErr
-		if err := sleep(ctx, retryDelay(resp, attempt)); err != nil {
-			return err
-		}
+// decode reads a 200 response into dest. Any other status returns an
+// *APIError.
+func decode(op string, req *http.Request, resp *http.Response, dest any) error {
+	// ResponseError adds the call to each error about the response, so the
+	// gap recorded from the error includes the call.
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+		apiErr := newAPIError(req, resp, body)
+		apiErr.roleDenied = roleDenied(op, resp.StatusCode)
+		return componentsdk.ResponseError(resp, apiErr)
 	}
-	return fmt.Errorf("max retries exceeded: %w", lastErr)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return componentsdk.ResponseError(resp, fmt.Errorf("reading the response to %s: %w", op, err))
+	}
+	if err := json.Unmarshal(body, dest); err != nil {
+		return componentsdk.ResponseError(resp, fmt.Errorf("decoding the response to %s: %w", op, err))
+	}
+	return nil
 }
 
-// paginate walks through paginated results using offset pagination.
-// It checks X-Next-Page first, then falls back to parsing Link rel="next".
-func (c *Client) paginate(ctx context.Context, path string, params url.Values, target any) error {
+// listAll reads every page of a list endpoint. A page that is not a JSON
+// array fails the read, so a missing list never reads as an empty one.
+func listAll[T any](ctx context.Context, c *Client, op, path string, params url.Values) ([]T, error) {
+	params.Set("per_page", strconv.Itoa(maxPerPage))
+	items := []T{}
 	page := 1
 	for {
 		params.Set("page", strconv.Itoa(page))
-
-		var pageData json.RawMessage
-		resp, err := c.getWithResponse(ctx, path, params, &pageData)
+		var batch *[]T
+		resp, err := c.get(ctx, op, path, params, &batch)
 		if err != nil {
-			return err
+			return nil, err
 		}
-
-		if err := appendJSON(target, pageData); err != nil {
-			return fmt.Errorf("decoding page %d: %w", page, err)
+		if batch == nil {
+			return nil, componentsdk.ResponseError(resp, invalidResponse(op, "has no list"))
 		}
-
+		items = append(items, *batch...)
 		next, ok := nextPageFromHeaders(resp.Header, page)
 		if !ok {
-			break
+			return items, nil
 		}
 		page = next
 	}
-	return nil
+}
+
+// invalidResponse reports a 200 response that lacks what the collector
+// reads from it.
+func invalidResponse(op, problem string) error {
+	return componentsdk.CodeError(componentsdk.CodeInvalidResponse, fmt.Errorf("the response to %s %s", op, problem))
 }
 
 // nextPageFromHeaders extracts the next page number from response headers.
@@ -328,141 +413,101 @@ func parseLinkNextPage(header string) (int, bool) {
 	return 0, false
 }
 
-// getWithResponse performs a GET with retry and returns the response for header inspection.
-func (c *Client) getWithResponse(ctx context.Context, path string, params url.Values, target any) (*http.Response, error) {
-	var lastErr error
-	for attempt := range maxAttempts {
-		resp, err := c.doRequest(ctx, path, params)
-		if err != nil {
-			return nil, err
-		}
+// APIError is a GitLab response with a status other than 200. It carries the
+// status, headers, and GitLab's own error text for componentsdk.Classify,
+// and never the raw body.
+type APIError struct {
+	StatusCode int
+	Method     string
+	// Path is the request's path, without its query.
+	Path   string
+	Header http.Header
+	// Message is GitLab's error text, such as "404 Group Not Found".
+	Message string
+	// Code is GitLab's OAuth error code, such as insufficient_scope.
+	Code string
 
-		if resp.StatusCode == http.StatusOK {
-			defer func() { _ = resp.Body.Close() }()
-			if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
-				return nil, fmt.Errorf("decoding response: %w", err)
-			}
-			return resp, nil
-		}
-
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-
-		apiErr := &APIError{StatusCode: resp.StatusCode, Body: string(body)}
-		if !retryableStatuses[resp.StatusCode] {
-			return nil, apiErr
-		}
-
-		lastErr = apiErr
-		if err := sleep(ctx, retryDelay(resp, attempt)); err != nil {
-			return nil, err
-		}
-	}
-	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+	routeMissing bool
+	roleDenied   bool
 }
 
-func (c *Client) doRequest(ctx context.Context, path string, params url.Values) (*http.Response, error) {
-	u := c.baseURL + path
-	if len(params) > 0 {
-		u += "?" + params.Encode()
-	}
+var oauthCode = regexp.MustCompile(`^[a-z_]+$`)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("PRIVATE-TOKEN", c.token)
+const maxMessage = 200
 
-	return c.httpClient.Do(req)
+func newAPIError(req *http.Request, resp *http.Response, body []byte) *APIError {
+	e := &APIError{StatusCode: resp.StatusCode, Method: req.Method, Path: req.URL.Path, Header: resp.Header}
+	var payload struct {
+		Message          any    `json:"message"`
+		Error            any    `json:"error"`
+		ErrorDescription string `json:"error_description"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return e
+	}
+	message, _ := payload.Message.(string)
+	errText, _ := payload.Error.(string)
+	switch {
+	case oauthCode.MatchString(errText):
+		e.Code = errText
+		message = payload.ErrorDescription
+	case message == "":
+		message = errText
+	}
+	// GitLab answers a route it does not have with {"error":"404 Not Found"},
+	// and a missing resource with {"message":"404 ... Not Found"}.
+	e.routeMissing = resp.StatusCode == http.StatusNotFound && errText == "404 Not Found"
+	if len(message) > maxMessage {
+		message = message[:maxMessage] + "..."
+	}
+	e.Message = message
+	return e
 }
 
-func retryDelay(resp *http.Response, attempt int) time.Duration {
-	if resp != nil {
-		if after := resp.Header.Get("Retry-After"); after != "" {
-			if seconds, err := strconv.Atoi(after); err == nil && seconds > 0 {
-				return time.Duration(seconds) * time.Second
-			}
-		}
+func (e *APIError) Error() string {
+	text := fmt.Sprintf("GitLab API %s %s returned %d", e.Method, e.Path, e.StatusCode)
+	switch {
+	case e.Code != "" && e.Message != "":
+		text += ": " + e.Code + ": " + e.Message
+	case e.Code != "":
+		text += ": " + e.Code
+	case e.Message != "":
+		text += ": " + e.Message
 	}
-	return backoff(attempt)
+	return text
 }
 
-func backoff(attempt int) time.Duration {
-	base := math.Pow(2, float64(attempt))
-	jitter := rand.Float64() * base * 0.5
-	return time.Duration(base+jitter) * time.Second
+func (e *APIError) HTTPStatus() int         { return e.StatusCode }
+func (e *APIError) HTTPHeader() http.Header { return e.Header }
+func (e *APIError) VendorCode() string      { return e.Code }
+
+// CollectionCode reads a 404 for a route the instance does not have as
+// not_licensed: the edition or version lacks the feature, as GitLab Free
+// lacks group webhooks, group audit events, and merge request approval
+// settings. It reads the status in roleDeniedStatus as permission_denied.
+func (e *APIError) CollectionCode() componentsdk.Code {
+	switch {
+	case e.routeMissing:
+		return componentsdk.CodeNotLicensed
+	case e.roleDenied:
+		return componentsdk.CodePermissionDenied
+	}
+	return ""
 }
 
-func sleep(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
+// StatusOf returns the HTTP status of the GitLab response that caused err,
+// or 0 when no response did.
+func StatusOf(err error) int {
+	var e *APIError
+	if errors.As(err, &e) {
+		return e.StatusCode
 	}
+	return 0
 }
 
-// appendJSON unmarshals pageData (a JSON array) and appends to target (a pointer to a slice).
-func appendJSON(target any, pageData json.RawMessage) error {
-	switch t := target.(type) {
-	case *[]Project:
-		var page []Project
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return err
-		}
-		*t = append(*t, page...)
-	case *[]ProtectedBranch:
-		var page []ProtectedBranch
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return err
-		}
-		*t = append(*t, page...)
-	case *[]ApprovalRule:
-		var page []ApprovalRule
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return err
-		}
-		*t = append(*t, page...)
-	case *[]Member:
-		var page []Member
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return err
-		}
-		*t = append(*t, page...)
-	case *[]Webhook:
-		var page []Webhook
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return err
-		}
-		*t = append(*t, page...)
-	case *[]DeployKey:
-		var page []DeployKey
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return err
-		}
-		*t = append(*t, page...)
-	case *[]Runner:
-		var page []Runner
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return err
-		}
-		*t = append(*t, page...)
-	case *[]AuditEvent:
-		var page []AuditEvent
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return err
-		}
-		*t = append(*t, page...)
-	case *[]VulnerabilityFinding:
-		var page []VulnerabilityFinding
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return err
-		}
-		*t = append(*t, page...)
-	default:
-		return fmt.Errorf("unsupported target type for pagination: %T", target)
-	}
-	return nil
+// GroupNotFound reports whether err is GitLab's answer for a group that does
+// not exist or that the token cannot see.
+func GroupNotFound(err error) bool {
+	var e *APIError
+	return errors.As(err, &e) && e.StatusCode == http.StatusNotFound && e.Message == "404 Group Not Found"
 }

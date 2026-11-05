@@ -4,20 +4,25 @@ GitLab group security posture collector for [epack](https://github.com/locktivit
 
 It collects group-wide posture metrics from the GitLab REST API and emits:
 
-- a detailed GitLab artifact at `artifacts/gitlab.json` (always)
-- a normalized `evidencepack/vcs-posture@v1` artifact at `artifacts/gitlab.vcs-posture.json` (always)
+- a detailed GitLab artifact at `artifacts/gitlab.details.json` (always), described by the JSON Schema in [docs/schema/v1.0.0.json](docs/schema/v1.0.0.json)
+- a normalized `evidencepack/vcs-posture@v1` artifact at `artifacts/gitlab.vcs-posture.json` (always). At every level, its `repositories_present` field records whether the filters select any project. From the audit level, it also has the project count behind each percentage.
+- a normalized `evidencepack/access-posture@v1` artifact at `artifacts/gitlab.access-posture.json` (always), with the group's 2FA requirement, members and their last activity, Owners, access tokens, and deploy keys
+- a normalized `evidencepack/vuln-scanning@v1` artifact at `artifacts/gitlab.vuln-scanning.json` (always), with dependency scanning, SAST, and secret detection coverage and open findings
+- a collector result at `artifacts/gitlab.collector-result.json` (always), which records each value the collector could not read and why, and the calls it made
 
 ## What It Collects
 
 - **Branch protection:** default-branch protection coverage, merge request enforcement, code owner approval, force push restrictions
 - **Approval rules:** project-level approval settings and approval rules (Premium+)
 - **Security features:** secret push protection, pipeline-required enforcement
+- **Vulnerability scanning:** dependency scanning, SAST, and secret detection coverage, with open vulnerabilities by severity (Ultimate)
+- **Credentials:** group and project access tokens and deploy keys, with their expiry, last use, and write access
 - **Access control:** 2FA requirement, project creation level, share-with-group lock
 - **Members:** group members with roles and state, plus 2FA status when the API exposes it (audit+)
 - **Projects:** per-project inventory with visibility, branch protection details, and approval settings (audit+)
 - **Webhooks:** group and project webhook counts (audit+), with host/SSL detail (internal)
 - **Deploy keys:** read-write vs read-only counts (audit+, requires Maintainer), per-key fingerprints (internal)
-- **Runners:** inventory of runners available to the group, with status (audit+); tags are included only if returned by the list endpoint
+- **Runners:** inventory of the group runners available to the group, with status (audit+); tags are included only if returned by the list endpoint
 - **Audit log:** 7-day audit event summary with action counts (internal)
 
 ## Collection Levels
@@ -55,7 +60,7 @@ epack collect
 
 Optional config keys:
 
-- `base_url`: GitLab instance URL for self-managed instances. Defaults to `https://gitlab.com`.
+- `base_url`: GitLab instance URL for self-managed instances, over https. Defaults to `https://gitlab.com`.
 - `level`: Collection depth. One of `trust`, `audit`, `internal`. Defaults to `trust`.
 - `include_patterns`: List of glob patterns to include projects. Defaults to `["*"]` (all projects).
 - `exclude_patterns`: List of glob patterns to exclude projects. Applied before include patterns.
@@ -105,7 +110,21 @@ The group-runner list endpoint has separate requirements: GitLab currently docum
 | `read_api` | Group, projects, branches, members, webhooks, deploy keys, audit events, subject to role and tier |
 | `manage_runner` | Additional scope documented for the group-runner endpoint; requires an appropriate role |
 
-Optional surface failures emit diagnostics and collection continues. Any API response with HTTP 401 fails the run. Non-permission failures fetching the group or project list also fail the run. Successful responses can still be incomplete: for example, a Developer or Maintainer sees only their own group audit events. Use Owner for a group-wide audit summary. See [configuration](docs/configuration.md) for field visibility and tier requirements.
+Successful responses can still be incomplete: for example, a Developer or Maintainer sees only their own group audit events. Use Owner for a group-wide audit summary. See [configuration](docs/configuration.md) for field visibility and tier requirements.
+
+## Failures and values left out
+
+Reading the configured group is the collector's sign-in. The run fails only when the configuration is invalid or that read fails:
+
+| Exit | Code | Cause |
+|---|---|---|
+| 2 | `config_invalid` | `group` or `GITLAB_TOKEN` is missing, `base_url` or a pattern is invalid, or GitLab answers that the group does not exist or the token cannot see it |
+| 3 | `auth_failed` | GitLab rejected the token |
+| 3 | `permission_denied` | The token cannot read the group, for example because it lacks the `read_api` scope |
+| 4 | `rate_limited`, `vendor_error`, `timeout` | GitLab kept throttling, failing, or timing out after retries |
+| 1 | `invalid_response` | GitLab's answer for the group was not what the collector expects |
+
+Otherwise the run exits 0, even when some surfaces could not be read. A value the collector could not read is left out, as `null` or an absent field, and is never written as 0 or false. The collector result gives each one a code, such as `permission_denied` for a missing role or `not_licensed` for a feature the GitLab tier lacks. A percentage over no projects is `null`. The collector retries reads that GitLab throttles or fails, waiting as `Retry-After` or `RateLimit-Reset` says, and sends the token only to the configured instance's host, never over plain http.
 
 ## Development
 

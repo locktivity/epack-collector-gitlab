@@ -1,5 +1,11 @@
 package collector
 
+import (
+	"time"
+
+	"github.com/locktivity/epack/componentsdk"
+)
+
 // StatusFunc is called to report indeterminate status updates.
 type StatusFunc func(message string)
 
@@ -13,6 +19,17 @@ type Config struct {
 	IncludePatterns []string `json:"include_patterns"`
 	ExcludePatterns []string `json:"exclude_patterns"`
 
+	// AccessPosture and VulnScanning say whether the run collects the
+	// access-posture and vuln-scanning artifacts. Run sets them from
+	// componentsdk.Selected.
+	AccessPosture bool `json:"-"`
+	VulnScanning  bool `json:"-"`
+
 	OnStatus   StatusFunc   `json:"-"`
 	OnProgress ProgressFunc `json:"-"`
+
+	// Recorder takes the gaps and the signed-in identity. Nil discards them.
+	Recorder *componentsdk.Recorder `json:"-"`
+	// Now reads the run's clock. Nil means time.Now.
+	Now func() time.Time `json:"-"`
 }

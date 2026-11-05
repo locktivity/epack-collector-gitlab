@@ -82,10 +82,12 @@ epack collect
   "scope": {
     "include_patterns": ["*"],
     "exclude_patterns": [],
-    "projects_coverage": 100
+    "projects_coverage": 100,
+    "project_count": 50,
+    "included_project_count": 50
   },
   "posture": {
-    "branch_protection_coverage": 95,
+    "branch_protection_coverage": 94,
     "security_features_coverage": 72
   },
   "access_control": {
@@ -94,8 +96,8 @@ epack collect
   "branch_protection_rules": {
     "merge_request_required": 92,
     "approving_reviews": 78,
-    "code_owner_approval": 45,
-    "no_force_push": 95
+    "code_owner_approval": 44,
+    "no_force_push": 94
   },
   "security_features": {
     "secret_push_protection": 60,
@@ -104,4 +106,4 @@ epack collect
 }
 ```
 
-This is an illustrative output. `diagnostics` is omitted when there are no warnings or permission errors. The 72% security-features coverage above is the mean of 60% secret push protection and 84% pipeline-required coverage. See [output limitations](overview.md#output-limitations) before interpreting zeros as disabled controls.
+This is an illustrative output. `diagnostics` is omitted when there are no warnings or permission errors. The 72% security-features coverage above is the mean of 60% secret push protection and 84% pipeline-required coverage. A value the collector could not read is `null`, with a gap in `artifacts/gitlab.collector-result.json` that says why; see [output limitations](overview.md#output-limitations).
