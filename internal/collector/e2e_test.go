@@ -22,6 +22,7 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -60,7 +61,7 @@ func getE2EConfig(t *testing.T) (Config, *gitlab.Client) {
 		Group:   group,
 		BaseURL: baseURL,
 	}
-	client := gitlab.NewClient(baseURL, token)
+	client := gitlab.NewClient(http.DefaultClient, baseURL, token)
 	return cfg, client
 }
 
@@ -103,7 +104,7 @@ func TestE2E_RealGitLabCollection(t *testing.T) {
 	assertPercentE2E(t, "branch_protection_rules.code_owner_approval", posture.BranchProtectionRules.CodeOwnerApproval)
 	assertPercentE2E(t, "branch_protection_rules.no_force_push", posture.BranchProtectionRules.NoForcePush)
 
-	if level >= componentsdk.LevelAudit {
+	if level.AtLeast(componentsdk.LevelAudit) {
 		if posture.Members == nil {
 			t.Error("members should be present at audit level")
 		}
@@ -150,9 +151,9 @@ func TestE2E_VCSPostureTransformation(t *testing.T) {
 		t.Errorf("schema_version = %q, want %q", normalized.SchemaVersion, SchemaVersion)
 	}
 
-	assertPercentFloatE2E(t, "vcs.branch_protection.pr_required_pct", normalized.BranchProtection.PRRequiredPct)
-	assertPercentFloatE2E(t, "vcs.branch_protection.approving_reviews_pct", normalized.BranchProtection.ApprovingReviewsPct)
-	assertPercentFloatE2E(t, "vcs.security_features.secret_scanning_pct", normalized.SecurityFeatures.SecretScanningPct)
+	assertPercentFloatE2E(t, "vcs.repo_coverage_pct", normalized.RepoCoveragePct.Value)
+	assertPercentFloatE2E(t, "vcs.branch_protection.pr_required_pct", normalized.BranchProtection.PRRequiredPct.Value)
+	assertPercentFloatE2E(t, "vcs.branch_protection.approving_reviews_pct", normalized.BranchProtection.ApprovingReviewsPct.Value)
 
 	data, _ := json.MarshalIndent(normalized, "", "  ")
 	t.Logf("VCS posture:\n%s", string(data))
@@ -181,16 +182,18 @@ func TestE2E_DiagnosticsAreSafe(t *testing.T) {
 		len(posture.Diagnostics.PermissionErrors), len(posture.Diagnostics.Warnings))
 }
 
-func assertPercentE2E(t *testing.T, name string, v int) {
+// assertPercentE2E checks a percentage the collector read. A null one was
+// left out, with a gap the run's recorder would hold.
+func assertPercentE2E(t *testing.T, name string, v *int) {
 	t.Helper()
-	if v < 0 || v > 100 {
-		t.Errorf("%s should be in [0,100], got %d", name, v)
+	if v != nil && (*v < 0 || *v > 100) {
+		t.Errorf("%s should be in [0,100], got %d", name, *v)
 	}
 }
 
-func assertPercentFloatE2E(t *testing.T, name string, v float64) {
+func assertPercentFloatE2E(t *testing.T, name string, v *float64) {
 	t.Helper()
-	if v < 0 || v > 100 {
-		t.Errorf("%s should be in [0,100], got %v", name, v)
+	if v != nil && (*v < 0 || *v > 100) {
+		t.Errorf("%s should be in [0,100], got %v", name, *v)
 	}
 }

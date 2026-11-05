@@ -5,6 +5,8 @@ import "time"
 const SchemaVersion = "1.0.0"
 
 // GroupPosture represents the collected security posture of a GitLab group.
+// A value the collector could not read is null or absent, with a gap in the
+// collector result that says why.
 type GroupPosture struct {
 	SchemaVersion    string `json:"schema_version"`
 	CollectedAt      string `json:"collected_at"`
@@ -26,6 +28,22 @@ type GroupPosture struct {
 	AuditLog   *AuditLog   `json:"audit_log,omitempty"`
 
 	Diagnostics *Diagnostics `json:"diagnostics,omitempty"`
+
+	// counts holds the numerators of the rule percentages, for the
+	// normalized artifact's counts.
+	counts ruleCounts
+	// fullPath is the group's full_path from GitLab, which names the
+	// organization in the normalized artifact. Group is the configured
+	// value, which can be a numeric ID.
+	fullPath string
+}
+
+// ruleCounts counts the selected projects that meet each rule. A count is
+// complete only when the rule's percentage was written.
+type ruleCounts struct {
+	mergeRequestRequired int
+	approvingReviews     int
+	pipelineRequired     int
 }
 
 type Diagnostics struct {
@@ -34,40 +52,34 @@ type Diagnostics struct {
 }
 
 type Scope struct {
-	IncludePatterns  []string `json:"include_patterns"`
-	ExcludePatterns  []string `json:"exclude_patterns"`
-	ProjectsCoverage int      `json:"projects_coverage"`
+	IncludePatterns      []string `json:"include_patterns"`
+	ExcludePatterns      []string `json:"exclude_patterns"`
+	ProjectsCoverage     *int     `json:"projects_coverage"`
+	ProjectCount         *int     `json:"project_count"`
+	IncludedProjectCount *int     `json:"included_project_count"`
 }
 
 type Posture struct {
-	BranchProtectionCoverage int `json:"branch_protection_coverage"`
-	SecurityFeaturesCoverage int `json:"security_features_coverage"`
+	BranchProtectionCoverage *int `json:"branch_protection_coverage"`
+	SecurityFeaturesCoverage *int `json:"security_features_coverage"`
 }
 
 type AccessControl struct {
-	TwoFactorRequired    *bool  `json:"two_factor_required"`
-	ProjectCreationLevel string `json:"project_creation_level,omitempty"`
-	ShareWithGroupLock   *bool  `json:"share_with_group_lock,omitempty"`
+	TwoFactorRequired    *bool   `json:"two_factor_required"`
+	ProjectCreationLevel *string `json:"project_creation_level,omitempty"`
+	ShareWithGroupLock   *bool   `json:"share_with_group_lock,omitempty"`
 }
 
 type BranchProtectionRules struct {
-	MergeRequestRequired int `json:"merge_request_required"`
-	ApprovingReviews     int `json:"approving_reviews"`
-	CodeOwnerApproval    int `json:"code_owner_approval"`
-	NoForcePush          int `json:"no_force_push"`
+	MergeRequestRequired *int `json:"merge_request_required"`
+	ApprovingReviews     *int `json:"approving_reviews"`
+	CodeOwnerApproval    *int `json:"code_owner_approval"`
+	NoForcePush          *int `json:"no_force_push"`
 }
 
 type SecurityFeatures struct {
-	SecretPushProtection int `json:"secret_push_protection"`
-	PipelineRequired     int `json:"pipeline_required"`
-
-	PerProject []SecurityFeaturesRow `json:"per_project,omitempty"`
-}
-
-type SecurityFeaturesRow struct {
-	Project              string `json:"project"`
-	SecretPushProtection bool   `json:"secret_push_protection"`
-	PipelineRequired     bool   `json:"pipeline_required"`
+	SecretPushProtection *int `json:"secret_push_protection"`
+	PipelineRequired     *int `json:"pipeline_required"`
 }
 
 // --- Audit/internal surfaces ---
@@ -77,7 +89,7 @@ type Members struct {
 	OwnerCount       int         `json:"owner_count"`
 	MaintainerCount  int         `json:"maintainer_count"`
 	DeveloperCount   int         `json:"developer_count"`
-	PerMember        []MemberRow `json:"per_member,omitempty"`
+	PerMember        []MemberRow `json:"per_member"`
 	Truncated        bool        `json:"truncated,omitempty"`
 	TruncatedDropped int         `json:"truncated_dropped,omitempty"`
 }
@@ -92,27 +104,32 @@ type MemberRow struct {
 }
 
 type Projects struct {
-	TotalCount    int          `json:"total_count"`
-	PublicCount   int          `json:"public_count"`
-	PrivateCount  int          `json:"private_count"`
-	InternalCount int          `json:"internal_count"`
-	ArchivedCount int          `json:"archived_count"`
-	PerProject    []ProjectRow `json:"per_project,omitempty"`
-	Truncated     bool         `json:"truncated,omitempty"`
-	TruncatedDropped int       `json:"truncated_dropped,omitempty"`
+	TotalCount       int          `json:"total_count"`
+	PublicCount      int          `json:"public_count"`
+	PrivateCount     int          `json:"private_count"`
+	InternalCount    int          `json:"internal_count"`
+	ArchivedCount    int          `json:"archived_count"`
+	PerProject       []ProjectRow `json:"per_project"`
+	Truncated        bool         `json:"truncated,omitempty"`
+	TruncatedDropped int          `json:"truncated_dropped,omitempty"`
 }
 
 type ProjectRow struct {
-	Name             string                  `json:"name"`
-	PathWithNamespace string                 `json:"path_with_namespace"`
-	Visibility       string                  `json:"visibility"`
-	Archived         bool                    `json:"archived"`
-	DefaultBranch    string                  `json:"default_branch,omitempty"`
-	CreatedAt        string                  `json:"created_at,omitempty"`
-	LastActivityAt   string                  `json:"last_activity_at,omitempty"`
-	MergeMethod      string                  `json:"merge_method,omitempty"`
-	BranchProtection *BranchProtectionDetail `json:"branch_protection,omitempty"`
-	ApprovalSettings *ApprovalDetail         `json:"approval_settings,omitempty"`
+	Name              string                  `json:"name"`
+	PathWithNamespace string                  `json:"path_with_namespace"`
+	Visibility        string                  `json:"visibility"`
+	Archived          bool                    `json:"archived"`
+	DefaultBranch     string                  `json:"default_branch,omitempty"`
+	CreatedAt         string                  `json:"created_at,omitempty"`
+	LastActivityAt    string                  `json:"last_activity_at,omitempty"`
+	MergeMethod       string                  `json:"merge_method,omitempty"`
+	BranchProtection  *BranchProtectionDetail `json:"branch_protection,omitempty"`
+	ApprovalSettings  *ApprovalDetail         `json:"approval_settings,omitempty"`
+
+	// Why branch_protection or approval_settings could not be read, kept
+	// for the row's gaps.
+	protectionErr error
+	approvalErr   error
 }
 
 type BranchProtectionDetail struct {
@@ -129,11 +146,13 @@ type ApprovalDetail struct {
 	MergeRequestsDisableCommittersApproval bool `json:"merge_requests_disable_committers_approval"`
 }
 
+// Webhooks lists rows only at internal; a list that was read and is empty is
+// [], so an absent list means the level left it out or a gap did.
 type Webhooks struct {
-	GroupCount   int          `json:"group_count"`
-	ProjectCount int         `json:"project_count"`
-	Group        []WebhookRow `json:"group,omitempty"`
-	Project      []WebhookRow `json:"project,omitempty"`
+	GroupCount   *int         `json:"group_count"`
+	ProjectCount *int         `json:"project_count"`
+	Group        []WebhookRow `json:"group,omitzero"`
+	Project      []WebhookRow `json:"project,omitzero"`
 }
 
 type WebhookRow struct {
@@ -142,12 +161,16 @@ type WebhookRow struct {
 	Active    bool   `json:"active"`
 	URLHost   string `json:"url_host,omitempty"`
 	SSLVerify bool   `json:"ssl_verify"`
+
+	// Why url_host is not known, kept for the row's gap.
+	hostErr error
 }
 
+// DeployKeys lists rows only at internal, as Webhooks does.
 type DeployKeys struct {
-	TotalCount     int            `json:"total_count"`
-	ReadWriteCount int            `json:"read_write_count"`
-	PerKey         []DeployKeyRow `json:"per_key,omitempty"`
+	TotalCount     *int           `json:"total_count"`
+	ReadWriteCount *int           `json:"read_write_count"`
+	PerKey         []DeployKeyRow `json:"per_key,omitzero"`
 }
 
 type DeployKeyRow struct {
@@ -161,7 +184,7 @@ type DeployKeyRow struct {
 
 type Runners struct {
 	GroupRunnerCount int         `json:"group_runner_count"`
-	PerRunner        []RunnerRow `json:"per_runner,omitempty"`
+	PerRunner        []RunnerRow `json:"per_runner"`
 }
 
 type RunnerRow struct {
@@ -171,15 +194,15 @@ type RunnerRow struct {
 	Type   string   `json:"type,omitempty"`
 	Online bool     `json:"online"`
 	Paused bool     `json:"paused"`
-	Tags   []string `json:"tags,omitempty"`
+	Tags   []string `json:"tags,omitzero"`
 }
 
 type AuditLog struct {
-	WindowDays       int              `json:"window_days"`
-	CountByAction    map[string]int   `json:"count_by_action,omitempty"`
-	Events           []AuditLogRow    `json:"events,omitempty"`
-	Truncated        bool             `json:"truncated,omitempty"`
-	TruncatedDropped int              `json:"truncated_dropped,omitempty"`
+	WindowDays       int            `json:"window_days"`
+	CountByAction    map[string]int `json:"count_by_action"`
+	Events           []AuditLogRow  `json:"events"`
+	Truncated        bool           `json:"truncated,omitempty"`
+	TruncatedDropped int            `json:"truncated_dropped,omitempty"`
 }
 
 type AuditLogRow struct {
@@ -188,11 +211,11 @@ type AuditLogRow struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-// NewGroupPosture creates a new GroupPosture with the current timestamp.
-func NewGroupPosture(group string) *GroupPosture {
+// NewGroupPosture creates a new GroupPosture stamped with now.
+func NewGroupPosture(group string, now time.Time) *GroupPosture {
 	return &GroupPosture{
 		SchemaVersion: SchemaVersion,
-		CollectedAt:   time.Now().UTC().Format(time.RFC3339),
+		CollectedAt:   now.UTC().Format(time.RFC3339),
 		Group:         group,
 	}
 }

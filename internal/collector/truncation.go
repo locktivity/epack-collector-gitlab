@@ -6,12 +6,11 @@ const (
 	MaxProjects    = 5000
 	MaxMembers     = 10000
 	MaxAuditEvents = 5000
-	MaxFindings    = 5000
 )
 
 type truncatable[T any] struct {
-	items           []T
-	truncated       bool
+	items            []T
+	truncated        bool
 	truncatedDropped int
 }
 

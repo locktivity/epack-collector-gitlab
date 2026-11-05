@@ -2,6 +2,10 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +24,8 @@ type fakeClient struct {
 	approvalRules     map[int][]gitlab.ApprovalRule
 	members           []gitlab.Member
 	membersErr        error
+	billable          []gitlab.BillableMember
+	billableErr       error
 	groupWebhooks     []gitlab.Webhook
 	groupWebhooksErr  error
 	projectWebhooks   map[int][]gitlab.Webhook
@@ -28,7 +34,14 @@ type fakeClient struct {
 	runnersErr        error
 	auditEvents       []gitlab.AuditEvent
 	auditEventsErr    error
-	vulnFindings      map[int][]gitlab.VulnerabilityFinding
+	groupTokens       []gitlab.AccessToken
+	groupTokensErr    error
+	projectTokens     map[int][]gitlab.AccessToken
+	projectTokensErr  map[int]error
+	scanners          map[int]gitlab.SecurityScanners
+	scannersErr       error
+	vulns             *gitlab.Vulnerabilities
+	vulnsErr          error
 }
 
 func (f *fakeClient) GetGroup(_ context.Context, _ string) (*gitlab.Group, error) {
@@ -64,6 +77,10 @@ func (f *fakeClient) ListGroupMembers(_ context.Context, _ string) ([]gitlab.Mem
 	return f.members, f.membersErr
 }
 
+func (f *fakeClient) ListBillableMembers(_ context.Context, _ string) ([]gitlab.BillableMember, error) {
+	return f.billable, f.billableErr
+}
+
 func (f *fakeClient) ListGroupWebhooks(_ context.Context, _ string) ([]gitlab.Webhook, error) {
 	return f.groupWebhooks, f.groupWebhooksErr
 }
@@ -90,14 +107,62 @@ func (f *fakeClient) ListGroupAuditEvents(_ context.Context, _ string, _ time.Ti
 	return f.auditEvents, f.auditEventsErr
 }
 
-func (f *fakeClient) ListVulnerabilityFindings(_ context.Context, projectID int) ([]gitlab.VulnerabilityFinding, error) {
-	if findings, ok := f.vulnFindings[projectID]; ok {
-		return findings, nil
+func (f *fakeClient) ListGroupAccessTokens(_ context.Context, _ string) ([]gitlab.AccessToken, error) {
+	return f.groupTokens, f.groupTokensErr
+}
+
+func (f *fakeClient) ListProjectAccessTokens(_ context.Context, projectID int) ([]gitlab.AccessToken, error) {
+	return f.projectTokens[projectID], f.projectTokensErr[projectID]
+}
+
+func (f *fakeClient) ListSecurityScanners(_ context.Context, projectIDs []int) (map[int]gitlab.SecurityScanners, error) {
+	if f.scannersErr != nil {
+		return nil, f.scannersErr
 	}
-	return nil, nil
+	out := map[int]gitlab.SecurityScanners{}
+	for _, id := range projectIDs {
+		if s, ok := f.scanners[id]; ok {
+			out[id] = s
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeClient) ListGroupVulnerabilities(_ context.Context, _ string) (*gitlab.Vulnerabilities, error) {
+	if f.vulnsErr != nil {
+		return nil, f.vulnsErr
+	}
+	if f.vulns == nil {
+		return &gitlab.Vulnerabilities{Readable: true, Items: []gitlab.Vulnerability{}}, nil
+	}
+	return f.vulns, nil
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func strPtr(s string) *string { return &s }
+
+// wantInt fails unless got holds want.
+func wantInt(t *testing.T, name string, got *int, want int) {
+	t.Helper()
+	if got == nil {
+		t.Errorf("%s = null, want %d", name, want)
+		return
+	}
+	if *got != want {
+		t.Errorf("%s = %d, want %d", name, *got, want)
+	}
+}
+
+// gapAt returns the gap recorded at pointer in the detailed artifact.
+func gapAt(rec *componentsdk.Recorder, pointer string) *componentsdk.Gap {
+	for _, g := range rec.Gaps() {
+		if g.Path == DetailedPath && g.Pointer == pointer {
+			return &g
+		}
+	}
+	return nil
+}
 
 type fakeClientWithBranchErr struct {
 	*fakeClient
@@ -114,11 +179,17 @@ type fakeClientWithApprovalErr struct {
 	approvalRulesErr    error
 }
 
-func (f *fakeClientWithApprovalErr) GetApprovalSettings(_ context.Context, _ int) (*gitlab.ApprovalSettings, error) {
+func (f *fakeClientWithApprovalErr) GetApprovalSettings(ctx context.Context, projectID int) (*gitlab.ApprovalSettings, error) {
+	if f.approvalSettingsErr == nil {
+		return f.fakeClient.GetApprovalSettings(ctx, projectID)
+	}
 	return nil, f.approvalSettingsErr
 }
 
-func (f *fakeClientWithApprovalErr) ListApprovalRules(_ context.Context, _ int) ([]gitlab.ApprovalRule, error) {
+func (f *fakeClientWithApprovalErr) ListApprovalRules(ctx context.Context, projectID int) ([]gitlab.ApprovalRule, error) {
+	if f.approvalRulesErr == nil {
+		return f.fakeClient.ListApprovalRules(ctx, projectID)
+	}
 	return nil, f.approvalRulesErr
 }
 
@@ -127,11 +198,11 @@ func TestCollect_TrustLevel_BasicPosture(t *testing.T) {
 		group: &gitlab.Group{
 			ID:                             1,
 			Name:                           "test-group",
-			RequireTwoFactorAuthentication: true,
+			RequireTwoFactorAuthentication: boolPtr(true),
 		},
 		projects: []gitlab.Project{
-			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private", SecretPushProtectionEnabled: boolPtr(true), OnlyAllowMergeIfPipelineSucceeds: true},
-			{ID: 11, Name: "project-b", DefaultBranch: "main", Visibility: "public"},
+			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private", SecretPushProtectionEnabled: boolPtr(true), OnlyAllowMergeIfPipelineSucceeds: boolPtr(true)},
+			{ID: 11, Name: "project-b", DefaultBranch: "main", Visibility: "public", SecretPushProtectionEnabled: boolPtr(false), OnlyAllowMergeIfPipelineSucceeds: boolPtr(false)},
 		},
 		protectedBranches: map[int][]gitlab.ProtectedBranch{
 			10: {{Name: "main", AllowForcePush: false, CodeOwnerApprovalRequired: true,
@@ -158,15 +229,11 @@ func TestCollect_TrustLevel_BasicPosture(t *testing.T) {
 	if posture.AccessControl.TwoFactorRequired == nil || !*posture.AccessControl.TwoFactorRequired {
 		t.Error("expected 2FA required")
 	}
-	if posture.BranchProtectionRules.MergeRequestRequired != 50 {
-		t.Errorf("expected 50%% merge request required, got %d", posture.BranchProtectionRules.MergeRequestRequired)
-	}
-	if posture.BranchProtectionRules.ApprovingReviews != 50 {
-		t.Errorf("expected 50%% approving reviews, got %d", posture.BranchProtectionRules.ApprovingReviews)
-	}
-	if posture.SecurityFeatures.SecretPushProtection != 50 {
-		t.Errorf("expected 50%% secret push protection, got %d", posture.SecurityFeatures.SecretPushProtection)
-	}
+	wantInt(t, "merge_request_required", posture.BranchProtectionRules.MergeRequestRequired, 50)
+	wantInt(t, "approving_reviews", posture.BranchProtectionRules.ApprovingReviews, 50)
+	wantInt(t, "secret_push_protection", posture.SecurityFeatures.SecretPushProtection, 50)
+	wantInt(t, "pipeline_required", posture.SecurityFeatures.PipelineRequired, 50)
+	wantInt(t, "security_features_coverage", posture.Posture.SecurityFeaturesCoverage, 50)
 	if posture.Members != nil {
 		t.Error("trust level should not include members")
 	}
@@ -220,9 +287,7 @@ func TestCollect_AuditLevel_IncludesInventories(t *testing.T) {
 	if posture.Webhooks == nil {
 		t.Fatal("audit level should include webhooks")
 	}
-	if posture.Webhooks.GroupCount != 1 {
-		t.Errorf("expected 1 group webhook, got %d", posture.Webhooks.GroupCount)
-	}
+	wantInt(t, "webhooks.group_count", posture.Webhooks.GroupCount, 1)
 	if len(posture.Webhooks.Group) != 0 {
 		t.Error("audit level should not include webhook detail rows")
 	}
@@ -284,9 +349,9 @@ func TestCollect_ProjectFiltering(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if posture.Scope.ProjectsCoverage != 33 {
-		t.Errorf("expected ~33%% coverage, got %d", posture.Scope.ProjectsCoverage)
-	}
+	wantInt(t, "projects_coverage", posture.Scope.ProjectsCoverage, 33)
+	wantInt(t, "project_count", posture.Scope.ProjectCount, 3)
+	wantInt(t, "included_project_count", posture.Scope.IncludedProjectCount, 1)
 }
 
 func TestCollect_ExcludePatterns(t *testing.T) {
@@ -309,20 +374,18 @@ func TestCollect_ExcludePatterns(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if posture.Scope.ProjectsCoverage != 50 {
-		t.Errorf("expected 50%% coverage, got %d", posture.Scope.ProjectsCoverage)
-	}
+	wantInt(t, "projects_coverage", posture.Scope.ProjectsCoverage, 50)
 }
 
 func TestCollect_GroupError_ReturnsError(t *testing.T) {
 	client := &fakeClient{
-		groupErr: &gitlab.APIError{StatusCode: 500, Body: "internal error"},
+		groupErr: &gitlab.APIError{StatusCode: 500, Message: "500 Internal Server Error"},
 	}
 
 	c := New(Config{Group: "test-group"}, client)
 	_, err := c.Collect(context.Background(), componentsdk.LevelTrust)
-	if err == nil {
-		t.Fatal("expected error for non-permission group failure")
+	if got := componentsdk.Classify(err); got != componentsdk.CodeVendorError {
+		t.Fatalf("code = %s (%v), want the sign-in to fail with vendor_error", got, err)
 	}
 }
 
@@ -336,16 +399,13 @@ func TestCollect_EmptyGroup(t *testing.T) {
 
 func TestCollect_Unauthorized_ReturnsError(t *testing.T) {
 	client := &fakeClient{
-		groupErr: &gitlab.APIError{StatusCode: 401, Body: "401 Unauthorized"},
+		groupErr: &gitlab.APIError{StatusCode: 401, Message: "401 Unauthorized"},
 	}
 
 	c := New(Config{Group: "test-group"}, client)
 	_, err := c.Collect(context.Background(), componentsdk.LevelTrust)
-	if err == nil {
-		t.Fatal("expected error for 401 response")
-	}
-	if !strings.Contains(err.Error(), "authentication failed") {
-		t.Errorf("expected authentication error message, got: %v", err)
+	if got := componentsdk.Classify(err); got != componentsdk.CodeAuthFailed {
+		t.Errorf("code = %s (%v), want auth_failed", got, err)
 	}
 }
 
@@ -398,6 +458,31 @@ func TestIsMRRequired_NoOnePush(t *testing.T) {
 	if !isMRRequired(levels) {
 		t.Error("expected MR required when push access_level=0 with no grants")
 	}
+}
+
+// A rule whose push selections were all cleared has an empty
+// push_access_levels list, and no one can push.
+func TestIsMRRequired_NoPushAccessLevels(t *testing.T) {
+	var branch gitlab.ProtectedBranch
+	body := `{"id":1,"name":"main","push_access_levels":[],"merge_access_levels":[{"id":2,"access_level":40}]}`
+	if err := json.Unmarshal([]byte(body), &branch); err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeClient{
+		group:             &gitlab.Group{ID: 1, Name: "test-group", FullPath: "test-group"},
+		projects:          []gitlab.Project{{ID: 10, Name: "svc", Visibility: "private", DefaultBranch: "main"}},
+		protectedBranches: map[int][]gitlab.ProtectedBranch{10: {branch}},
+	}
+	posture, err := New(Config{Group: "test-group"}, client).Collect(t.Context(), componentsdk.LevelAudit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInt(t, "merge_request_required", posture.BranchProtectionRules.MergeRequestRequired, 100)
+	vcs := posture.ToVCSPosture()
+	if p := vcs.BranchProtection.PRRequiredPct; !p.Read || p.Value == nil || *p.Value != 100 {
+		t.Errorf("pr_required_pct = %+v, want 100", p)
+	}
+	wantInt(t, "pr_required_repository_count", vcs.BranchProtection.PRRequiredRepositoryCount, 1)
 }
 
 func TestIsMRRequired_DeveloperPush(t *testing.T) {
@@ -480,7 +565,7 @@ func TestDiagnostics_TrustLevel_NoProjectNames(t *testing.T) {
 
 	fakeBranchErr := &fakeClientWithBranchErr{
 		fakeClient: client,
-		branchErr:  &gitlab.APIError{StatusCode: 500, Body: "internal error"},
+		branchErr:  &gitlab.APIError{StatusCode: 500, Message: "500 Internal Server Error"},
 	}
 
 	c := New(Config{Group: "test-group"}, fakeBranchErr)
@@ -499,7 +584,7 @@ func TestDiagnostics_TrustLevel_NoProjectNames(t *testing.T) {
 }
 
 func TestApprovalPermissionDenied_EmitsDiagnostic(t *testing.T) {
-	denied := &gitlab.APIError{StatusCode: 403, Body: "forbidden"}
+	denied := &gitlab.APIError{StatusCode: 403, Message: "403 Forbidden"}
 	client := &fakeClientWithApprovalErr{
 		fakeClient: &fakeClient{
 			group: &gitlab.Group{ID: 1, Name: "test-group"},
@@ -604,13 +689,11 @@ func TestApprovalCoverage_UnprotectedDefaultBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if posture.BranchProtectionRules.ApprovingReviews != 0 {
-		t.Errorf("expected 0%% approving reviews (unprotected default branch), got %d", posture.BranchProtectionRules.ApprovingReviews)
-	}
+	wantInt(t, "approving_reviews (unprotected default branch)", posture.BranchProtectionRules.ApprovingReviews, 0)
 }
 
 func TestPartialApprovalFailure_EmitsDiagnostic(t *testing.T) {
-	denied := &gitlab.APIError{StatusCode: 403, Body: "forbidden"}
+	denied := &gitlab.APIError{StatusCode: 403, Message: "403 Forbidden"}
 	client := &fakeClientWithApprovalErr{
 		fakeClient: &fakeClient{
 			group: &gitlab.Group{ID: 1, Name: "test-group"},
@@ -668,7 +751,7 @@ func TestMember2FA_NilPreserved(t *testing.T) {
 }
 
 func TestSafeDiagError(t *testing.T) {
-	apiErr := &gitlab.APIError{StatusCode: 500, Body: "sensitive internal error details"}
+	apiErr := &gitlab.APIError{StatusCode: 500, Message: "sensitive internal error details"}
 	msg := safeDiagError(apiErr)
 	if strings.Contains(msg, "sensitive") {
 		t.Errorf("safeDiagError leaked API body: %s", msg)
@@ -679,20 +762,20 @@ func TestSafeDiagError(t *testing.T) {
 }
 
 func TestToVCSPosture(t *testing.T) {
-	twoFA := true
 	posture := &GroupPosture{
-		Group: "test-group",
-		Scope: Scope{ProjectsCoverage: 100},
+		Group:       "test-group",
+		CollectedAt: "2026-10-17T12:00:00Z",
+		Scope:       Scope{ProjectsCoverage: intPtr(100)},
 		AccessControl: AccessControl{
-			TwoFactorRequired: &twoFA,
+			TwoFactorRequired: boolPtr(true),
 		},
 		BranchProtectionRules: BranchProtectionRules{
-			MergeRequestRequired: 80,
-			ApprovingReviews:     60,
+			MergeRequestRequired: intPtr(80),
+			ApprovingReviews:     intPtr(60),
 		},
 		SecurityFeatures: SecurityFeatures{
-			SecretPushProtection: 50,
-			PipelineRequired:    70,
+			SecretPushProtection: intPtr(50),
+			PipelineRequired:     intPtr(70),
 		},
 	}
 
@@ -703,55 +786,82 @@ func TestToVCSPosture(t *testing.T) {
 	if vcs.Organization != "test-group" {
 		t.Errorf("expected org test-group, got %s", vcs.Organization)
 	}
-	if !vcs.OrgSecurity.TwoFactorRequired {
-		t.Error("expected 2FA required in VCS posture")
+	if vcs.CollectedAt != posture.CollectedAt {
+		t.Errorf("collected_at = %s, want the detailed artifact's %s", vcs.CollectedAt, posture.CollectedAt)
 	}
-	if vcs.BranchProtection.PRRequiredPct != 80 {
-		t.Errorf("expected 80%% PR required, got %f", vcs.BranchProtection.PRRequiredPct)
+	if p := vcs.BranchProtection.PRRequiredPct.Value; p == nil || *p != 80 {
+		t.Errorf("expected 80%% PR required, got %v", p)
 	}
-	if vcs.SecurityFeatures.SecretScanningPct != 50 {
-		t.Errorf("expected 50%% secret scanning, got %f", vcs.SecurityFeatures.SecretScanningPct)
+	if p := vcs.BranchProtection.StatusChecksPct.Value; p == nil || *p != 70 {
+		t.Errorf("expected 70%% status checks, got %v", p)
 	}
 }
 
-func TestSurfaceCollector_401_FailsCollection(t *testing.T) {
+// The group setting can be a numeric ID. The organization is then the
+// group's full path from GitLab, and the detailed group stays as configured.
+func TestToVCSPosture_OrganizationIsTheGroupPath(t *testing.T) {
+	client := &fakeClient{group: &gitlab.Group{ID: 7, Name: "Acme", FullPath: "acme"}}
+	posture, err := New(Config{Group: "7"}, client).Collect(t.Context(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if org := posture.ToVCSPosture().Organization; org != "acme" {
+		t.Errorf("organization = %q, want the full path acme", org)
+	}
+	if posture.Group != "7" {
+		t.Errorf("group = %q, want the configured 7", posture.Group)
+	}
+}
+
+func TestToVCSPosture_LeavesUnknownValuesOut(t *testing.T) {
+	vcs := (&GroupPosture{Group: "test-group"}).ToVCSPosture()
+	if vcs.RepoCoveragePct.Read || vcs.RepositoriesPresent != nil || vcs.BranchProtection != (VCSPostureBranchProtection{}) {
+		t.Errorf("vcs posture = %+v, want every unknown value absent rather than false or 0", vcs)
+	}
+}
+
+func TestSurface401_LeavesTheSurfaceOut(t *testing.T) {
 	client := &fakeClient{
 		group: &gitlab.Group{ID: 1, Name: "test-group"},
 		projects: []gitlab.Project{
 			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private"},
 		},
 		protectedBranches: map[int][]gitlab.ProtectedBranch{},
-		membersErr:        gitlab.ErrUnauthorized,
+		membersErr:        &gitlab.APIError{StatusCode: 401, Message: "401 Unauthorized"},
 	}
 
-	c := New(Config{Group: "test-group"}, client)
-	_, err := c.Collect(context.Background(), componentsdk.LevelAudit)
-	if err == nil {
-		t.Fatal("expected error when members returns 401 at audit level")
+	rec := &componentsdk.Recorder{}
+	c := New(Config{Group: "test-group", Recorder: rec}, client)
+	posture, err := c.Collect(context.Background(), componentsdk.LevelAudit)
+	if err != nil {
+		t.Fatalf("a 401 after the sign-in failed the run: %v", err)
 	}
-	if !strings.Contains(err.Error(), "authentication failed") {
-		t.Errorf("expected authentication failed error, got: %v", err)
+	if posture.Members != nil {
+		t.Errorf("members = %+v, want them left out", posture.Members)
+	}
+	if g := gapAt(rec, "/members"); g == nil || g.Code != componentsdk.CodeAuthFailed {
+		t.Errorf("gap at /members = %+v, want auth_failed", g)
 	}
 }
 
-func TestFatalError_DoesNotLeakBody(t *testing.T) {
+func TestDiagnostics_DoNotCarryGitLabMessages(t *testing.T) {
 	client := &fakeClient{
-		groupErr: &gitlab.APIError{StatusCode: 500, Body: "sensitive database trace"},
+		group:       &gitlab.Group{ID: 1, Name: "test-group"},
+		projectsErr: &gitlab.APIError{StatusCode: 500, Message: "sensitive database trace"},
 	}
 
 	c := New(Config{Group: "test-group"}, client)
-	_, err := c.Collect(context.Background(), componentsdk.LevelTrust)
-	if err == nil {
-		t.Fatal("expected error from GetGroup failure")
+	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(err.Error(), "sensitive") {
-		t.Errorf("fatal error leaked API body: %v", err)
+	if posture.Diagnostics == nil || len(posture.Diagnostics.Warnings) == 0 {
+		t.Fatal("expected a diagnostic for the failed project list")
 	}
-	if strings.Contains(err.Error(), "database") {
-		t.Errorf("fatal error leaked API body: %v", err)
-	}
-	if !strings.Contains(err.Error(), "HTTP 500") {
-		t.Errorf("expected sanitized HTTP 500, got: %v", err)
+	for _, w := range posture.Diagnostics.Warnings {
+		if strings.Contains(w, "sensitive") {
+			t.Errorf("diagnostic leaked GitLab's message: %s", w)
+		}
 	}
 }
 
@@ -776,24 +886,33 @@ func TestIsMRRequired_MixedCustomRoleAndNoOne(t *testing.T) {
 	}
 }
 
-func TestSecretPushProtection_NilNotCountedAsDisabled(t *testing.T) {
+func TestSecretPushProtection_NilLeavesTheRollupOut(t *testing.T) {
 	client := &fakeClient{
 		group: &gitlab.Group{ID: 1, Name: "test-group"},
 		projects: []gitlab.Project{
-			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private", SecretPushProtectionEnabled: boolPtr(true)},
-			{ID: 11, Name: "project-b", DefaultBranch: "main", Visibility: "private"},
+			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private", SecretPushProtectionEnabled: boolPtr(true), OnlyAllowMergeIfPipelineSucceeds: boolPtr(true)},
+			{ID: 11, Name: "project-b", DefaultBranch: "main", Visibility: "private", OnlyAllowMergeIfPipelineSucceeds: boolPtr(false)},
 		},
 		protectedBranches: map[int][]gitlab.ProtectedBranch{},
 	}
 
-	c := New(Config{Group: "test-group"}, client)
+	rec := &componentsdk.Recorder{}
+	c := New(Config{Group: "test-group", Recorder: rec}, client)
 	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if posture.SecurityFeatures.SecretPushProtection != 50 {
-		t.Errorf("expected 50%% secret push protection, got %d", posture.SecurityFeatures.SecretPushProtection)
+	if got := posture.SecurityFeatures.SecretPushProtection; got != nil {
+		t.Errorf("secret_push_protection = %d, want it left out rather than counting the unreported project as disabled", *got)
 	}
+	g := gapAt(rec, "/security_features/secret_push_protection")
+	if g == nil || g.Status != componentsdk.GapPartial || g.Unmeasured != 1 || g.Code != componentsdk.CodePermissionDenied {
+		t.Errorf("gap = %+v, want partial permission_denied with 1 unmeasured", g)
+	}
+	if g := gapAt(rec, "/posture/security_features_coverage"); g == nil || g.Unmeasured != 1 {
+		t.Errorf("security_features_coverage gap = %+v, want partial with 1 unmeasured", g)
+	}
+	wantInt(t, "pipeline_required", posture.SecurityFeatures.PipelineRequired, 50)
 	if posture.Diagnostics == nil {
 		t.Fatal("expected diagnostics when secret push protection status is unknown for some projects")
 	}
@@ -808,33 +927,157 @@ func TestSecretPushProtection_NilNotCountedAsDisabled(t *testing.T) {
 	}
 }
 
-func TestGroupSettings403_LeavesAccessControlUnknown(t *testing.T) {
+func TestSecretPushProtection_MissingEverywhereIsNotLicensed(t *testing.T) {
 	client := &fakeClient{
-		groupErr: gitlab.ErrPermissionDenied,
+		group: &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{
+			{ID: 10, Name: "project-a", Visibility: "private", OnlyAllowMergeIfPipelineSucceeds: boolPtr(true)},
+			{ID: 11, Name: "project-b", Visibility: "private", OnlyAllowMergeIfPipelineSucceeds: boolPtr(false)},
+		},
+	}
+
+	rec := &componentsdk.Recorder{}
+	if _, err := New(Config{Group: "test-group", Recorder: rec}, client).Collect(context.Background(), componentsdk.LevelTrust); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if g := gapAt(rec, "/security_features/secret_push_protection"); g == nil || g.Code != componentsdk.CodeNotLicensed || g.Unmeasured != 2 {
+		t.Errorf("gap = %+v, want not_licensed with 2 unmeasured", g)
+	}
+}
+
+func TestGroupRead403_FailsTheRun(t *testing.T) {
+	client := &fakeClient{
+		groupErr: &gitlab.APIError{StatusCode: 403, Code: "insufficient_scope"},
 		projects: []gitlab.Project{},
 	}
 
 	c := New(Config{Group: "test-group"}, client)
-	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	_, err := c.Collect(context.Background(), componentsdk.LevelTrust)
+	if got := componentsdk.Classify(err); got != componentsdk.CodePermissionDenied {
+		t.Errorf("code = %s (%v), want the sign-in to fail with permission_denied", got, err)
+	}
+}
+
+func TestGroupNotFound_IsAConfigError(t *testing.T) {
+	client := &fakeClient{groupErr: &gitlab.APIError{StatusCode: 404, Message: "404 Group Not Found"}}
+
+	_, err := New(Config{Group: "no-such-group"}, client).Collect(context.Background(), componentsdk.LevelTrust)
+	if got := componentsdk.Classify(err); got != componentsdk.CodeConfigInvalid {
+		t.Errorf("code = %s (%v), want config_invalid", got, err)
+	}
+}
+
+func TestFailedProjectList_LeavesProjectValuesOut(t *testing.T) {
+	client := &fakeClient{
+		group:         &gitlab.Group{ID: 1, Name: "test-group", RequireTwoFactorAuthentication: boolPtr(true), ProjectCreationLevel: strPtr("maintainer"), ShareWithGroupLock: boolPtr(false)},
+		projectsErr:   &gitlab.APIError{StatusCode: 502},
+		members:       []gitlab.Member{},
+		groupWebhooks: []gitlab.Webhook{},
+		runners:       []gitlab.Runner{},
+	}
+
+	rec := &componentsdk.Recorder{}
+	posture, err := New(Config{Group: "test-group", Recorder: rec}, client).Collect(context.Background(), componentsdk.LevelAudit)
+	if err != nil {
+		t.Fatalf("a failed project list failed the run: %v", err)
+	}
+	if posture.Scope.ProjectsCoverage != nil || posture.Posture.BranchProtectionCoverage != nil || posture.BranchProtectionRules.ApprovingReviews != nil {
+		t.Errorf("posture = %+v, want project values left out rather than 0", posture)
+	}
+	if posture.Projects != nil || posture.DeployKeys != nil || posture.Webhooks.ProjectCount != nil {
+		t.Error("project inventories should be left out with the project list")
+	}
+	for _, pointer := range []string{"/scope/included_project_count", "/branch_protection_rules/no_force_push", "/projects", "/deploy_keys", "/webhooks/project_count"} {
+		if g := gapAt(rec, pointer); g == nil || g.Code != componentsdk.CodeVendorError {
+			t.Errorf("gap at %s = %+v, want vendor_error", pointer, g)
+		}
+	}
+	wantInt(t, "webhooks.group_count", posture.Webhooks.GroupCount, 0)
+}
+
+func TestApprovalRulesFailure_KeepsAKnownApproval(t *testing.T) {
+	client := &fakeClientWithApprovalErr{
+		fakeClient: &fakeClient{
+			group: &gitlab.Group{ID: 1, Name: "test-group"},
+			projects: []gitlab.Project{
+				{ID: 10, Name: "needs-two", DefaultBranch: "main", Visibility: "private"},
+				{ID: 11, Name: "needs-none", DefaultBranch: "main", Visibility: "private"},
+			},
+			approvalSettings: map[int]*gitlab.ApprovalSettings{10: {ApprovalsBeforeMerge: 2}},
+		},
+		approvalRulesErr: &gitlab.APIError{StatusCode: 500},
+	}
+
+	rec := &componentsdk.Recorder{}
+	posture, err := New(Config{Group: "test-group", Recorder: rec}, client).Collect(context.Background(), componentsdk.LevelAudit)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if posture.AccessControl.TwoFactorRequired != nil {
-		t.Errorf("expected nil TwoFactorRequired after group 403, got %v", *posture.AccessControl.TwoFactorRequired)
+	g := gapAt(rec, "/branch_protection_rules/approving_reviews")
+	if posture.BranchProtectionRules.ApprovingReviews != nil || g == nil || g.Unmeasured != 1 || g.Code != componentsdk.CodeVendorError {
+		t.Errorf("approving_reviews = %v with gap %+v; want it left out, with only the project that needs no approval unmeasured", posture.BranchProtectionRules.ApprovingReviews, g)
+	}
+	for i := range posture.Projects.PerProject {
+		if posture.Projects.PerProject[i].ApprovalSettings != nil || gapAt(rec, rowPointer("/projects/per_project", i, "approval_settings")) == nil {
+			t.Errorf("row %d approval_settings should be left out with a gap, since the rules could require more", i)
+		}
+	}
+}
+
+func TestProtectedBranchFailure_LeavesRollupsOut(t *testing.T) {
+	client := &fakeClientWithBranchErr{
+		fakeClient: &fakeClient{
+			group:    &gitlab.Group{ID: 1, Name: "test-group"},
+			projects: []gitlab.Project{{ID: 10, Name: "proj", DefaultBranch: "main", Visibility: "private"}},
+		},
+		branchErr: &gitlab.APIError{StatusCode: 429},
+	}
+
+	rec := &componentsdk.Recorder{}
+	posture, err := New(Config{Group: "test-group", Recorder: rec}, client).Collect(context.Background(), componentsdk.LevelAudit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, pointer := range []string{"/posture/branch_protection_coverage", "/branch_protection_rules/merge_request_required", "/branch_protection_rules/approving_reviews", "/projects/per_project/0/branch_protection", "/projects/per_project/0/approval_settings"} {
+		if g := gapAt(rec, pointer); g == nil || g.Code != componentsdk.CodeRateLimited {
+			t.Errorf("gap at %s = %+v, want rate_limited", pointer, g)
+		}
+	}
+	if posture.Posture.BranchProtectionCoverage != nil {
+		t.Errorf("branch_protection_coverage = %d, want it left out", *posture.Posture.BranchProtectionCoverage)
+	}
+}
+
+func TestNoProjects_PercentagesAreNull(t *testing.T) {
+	client := &fakeClient{group: &gitlab.Group{ID: 1, Name: "test-group"}, projects: []gitlab.Project{}}
+
+	rec := &componentsdk.Recorder{}
+	posture, err := New(Config{Group: "test-group", Recorder: rec}, client).Collect(context.Background(), componentsdk.LevelTrust)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.Scope.ProjectsCoverage != nil || posture.Posture.SecurityFeaturesCoverage != nil || posture.BranchProtectionRules.MergeRequestRequired != nil {
+		t.Errorf("posture = %+v, want percentages over no projects null", posture)
+	}
+	wantInt(t, "project_count", posture.Scope.ProjectCount, 0)
+	for _, g := range rec.Gaps() {
+		if strings.HasPrefix(g.Pointer, "/scope") || strings.HasPrefix(g.Pointer, "/posture") {
+			t.Errorf("an empty population is an answer, not a gap: %+v", g)
+		}
 	}
 }
 
 func TestToVCSPosture_StaticUnavailableMarkers(t *testing.T) {
 	posture := &GroupPosture{
 		Group: "test-group",
-		Scope: Scope{ProjectsCoverage: 100},
+		Scope: Scope{ProjectsCoverage: intPtr(100)},
 		AccessControl: AccessControl{
 			TwoFactorRequired: boolPtr(true),
 		},
 	}
 
 	vcs := posture.ToVCSPosture()
-	expectedMarkers := []string{"signed_commits", "vuln_alerts", "code_scanning"}
+	expectedMarkers := []string{"signed_commits"}
 	for _, marker := range expectedMarkers {
 		found := false
 		for _, u := range vcs.UnavailableSources {
@@ -846,6 +1089,16 @@ func TestToVCSPosture_StaticUnavailableMarkers(t *testing.T) {
 		if !found {
 			t.Errorf("expected unavailable marker for %s, got: %v", marker, vcs.UnavailableSources)
 		}
+	}
+}
+
+// The push rules API has reject_unsigned_commits on Premium and above. The
+// entry names what is not collected.
+func TestToVCSPosture_SignedCommitsMarkerNamesThePushRule(t *testing.T) {
+	vcs := (&GroupPosture{Group: "test-group"}).ToVCSPosture()
+	want := "signed_commits: the reject_unsigned_commits push rule is not collected"
+	if !slices.Contains(vcs.UnavailableSources, want) {
+		t.Errorf("unavailable_sources = %v, want %q", vcs.UnavailableSources, want)
 	}
 }
 
@@ -862,6 +1115,9 @@ func TestInvalidExcludePattern_ReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exclude_patterns") {
 		t.Errorf("expected exclude_patterns in error, got: %v", err)
+	}
+	if got := componentsdk.Classify(err); got != componentsdk.CodeConfigInvalid {
+		t.Errorf("code = %s, want config_invalid", got)
 	}
 }
 
@@ -898,53 +1154,200 @@ func TestEmptyRepo_NoFalsePositiveBranchProtection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if posture.BranchProtectionRules.MergeRequestRequired != 0 {
-		t.Errorf("empty repo should not get MR required, got %d%%", posture.BranchProtectionRules.MergeRequestRequired)
-	}
-	if posture.Posture.BranchProtectionCoverage != 0 {
-		t.Errorf("empty repo should not count as protected, got %d%%", posture.Posture.BranchProtectionCoverage)
-	}
+	wantInt(t, "merge_request_required (empty repo)", posture.BranchProtectionRules.MergeRequestRequired, 0)
+	wantInt(t, "branch_protection_coverage (empty repo)", posture.Posture.BranchProtectionCoverage, 0)
 }
 
-func TestCancellation_ReturnsError(t *testing.T) {
+func TestCancellation_FailsTheSignIn(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("a canceled run reached GitLab")
+	}))
+	defer srv.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	client := &fakeClient{
-		group: &gitlab.Group{ID: 1, Name: "test-group"},
-		projects: []gitlab.Project{
-			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private"},
-		},
-		protectedBranches: map[int][]gitlab.ProtectedBranch{},
-	}
-
-	c := New(Config{Group: "test-group"}, client)
+	c := New(Config{Group: "test-group"}, gitlab.NewClient(srv.Client(), srv.URL, "test-token"))
 	_, err := c.Collect(ctx, componentsdk.LevelTrust)
-	if err == nil {
-		t.Fatal("expected error from canceled context")
+	if got := componentsdk.Classify(err); got != componentsdk.CodeTimeout {
+		t.Fatalf("code = %s (%v), want timeout", got, err)
 	}
 }
 
-func TestGroupSettings403_ShareWithGroupLock_Unknown(t *testing.T) {
+func TestGroupWithoutSettings_LeavesThemOut(t *testing.T) {
 	client := &fakeClient{
-		groupErr: gitlab.ErrPermissionDenied,
-		projects: []gitlab.Project{
-			{ID: 10, Name: "project-a", DefaultBranch: "main", Visibility: "private"},
-		},
-		protectedBranches: map[int][]gitlab.ProtectedBranch{},
-		members:           []gitlab.Member{},
+		group:    &gitlab.Group{ID: 1, Name: "test-group"},
+		projects: []gitlab.Project{},
+		members:  []gitlab.Member{},
 	}
 
-	c := New(Config{Group: "test-group"}, client)
+	rec := &componentsdk.Recorder{}
+	c := New(Config{Group: "test-group", Recorder: rec}, client)
 	posture, err := c.Collect(context.Background(), componentsdk.LevelAudit)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if posture.AccessControl.ShareWithGroupLock != nil {
-		t.Errorf("expected nil ShareWithGroupLock after group 403, got %v", *posture.AccessControl.ShareWithGroupLock)
+	if posture.AccessControl != (AccessControl{}) {
+		t.Errorf("access_control = %+v, want every unreported setting left out rather than false", posture.AccessControl)
 	}
-	if posture.AccessControl.ProjectCreationLevel != "" {
-		t.Errorf("expected empty ProjectCreationLevel after group 403, got %s", posture.AccessControl.ProjectCreationLevel)
+	for _, pointer := range []string{"/access_control/two_factor_required", "/access_control/project_creation_level", "/access_control/share_with_group_lock"} {
+		if g := gapAt(rec, pointer); g == nil || g.Code != componentsdk.CodeInvalidResponse {
+			t.Errorf("gap at %s = %+v, want invalid_response", pointer, g)
+		}
+	}
+}
+
+func TestTwoFactorRequired_AncestorGroup(t *testing.T) {
+	tests := []struct {
+		name          string
+		own, ancestor *bool
+		want          bool
+	}{
+		{"required by an ancestor", boolPtr(false), boolPtr(true), true},
+		{"required by the group", boolPtr(true), boolPtr(false), true},
+		{"required nowhere", boolPtr(false), boolPtr(false), false},
+		{"GitLab before 19.6", boolPtr(false), nil, false},
+		{"ancestor only", nil, boolPtr(true), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakeClient{
+				group: &gitlab.Group{ID: 8, Name: "platform", RequireTwoFactorAuthentication: tt.own, RequireTwoFactorFromAncestor: tt.ancestor},
+			}
+			rec := &componentsdk.Recorder{}
+			posture, err := New(Config{Group: "acme/platform", Recorder: rec}, client).Collect(context.Background(), componentsdk.LevelTrust)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := posture.AccessControl.TwoFactorRequired; got == nil || *got != tt.want {
+				t.Errorf("two_factor_required = %v, want %v", got, tt.want)
+			}
+			if g := gapAt(rec, "/access_control/two_factor_required"); g != nil {
+				t.Errorf("gap at two_factor_required = %+v, want none", g)
+			}
+		})
+	}
+}
+
+// Rules from merge request approval policies and Coverage-Check need
+// approval only when their condition is met. An any_merge_request policy
+// applies to every merge request.
+func TestApprovalRule_ConditionalRulesDoNotCount(t *testing.T) {
+	tests := []struct {
+		name string
+		rule gitlab.ApprovalRule
+		want int
+	}{
+		{"regular rule", gitlab.ApprovalRule{RuleType: "regular"}, 100},
+		{"Coverage-Check", gitlab.ApprovalRule{RuleType: "report_approver", ReportType: "code_coverage"}, 0},
+		{"scan finding policy", gitlab.ApprovalRule{RuleType: "report_approver", ReportType: "scan_finding"}, 0},
+		{"any merge request policy", gitlab.ApprovalRule{RuleType: "report_approver", ReportType: "any_merge_request"}, 100},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rule := tt.rule
+			rule.ID, rule.ApprovalsRequired, rule.AppliesToAllProtectedBranches = 1, 2, true
+			client := &fakeClient{
+				group:    &gitlab.Group{ID: 1, Name: "test-group"},
+				projects: []gitlab.Project{{ID: 10, Name: "svc", Visibility: "private", DefaultBranch: "main"}},
+				protectedBranches: map[int][]gitlab.ProtectedBranch{
+					10: {{Name: "main", PushAccessLevels: []gitlab.BranchAccessLevel{{AccessLevel: 40}}}},
+				},
+				approvalRules: map[int][]gitlab.ApprovalRule{10: {rule}},
+			}
+			posture, err := New(Config{Group: "test-group"}, client).Collect(context.Background(), componentsdk.LevelAudit)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			wantInt(t, "approving_reviews", posture.BranchProtectionRules.ApprovingReviews, tt.want)
+			settings := posture.Projects.PerProject[0].ApprovalSettings
+			switch {
+			case tt.want == 0 && settings != nil:
+				t.Errorf("approval_settings = %+v, want it absent", *settings)
+			case tt.want > 0 && (settings == nil || settings.ApprovalsRequired != 2):
+				t.Errorf("approval_settings = %+v, want approvals_required 2", settings)
+			}
+			vcs := posture.ToVCSPosture()
+			if p := vcs.BranchProtection.ApprovingReviewsPct.Value; p == nil || *p != float64(tt.want) {
+				t.Errorf("approving_reviews_pct = %v, want %d", p, tt.want)
+			}
+			wantInt(t, "approving_reviews_repository_count", vcs.BranchProtection.ApprovingReviewsRepositoryCount, tt.want/100)
+		})
+	}
+}
+
+func TestRunners_CountOnlyGroupRunners(t *testing.T) {
+	client := &fakeClient{
+		group: &gitlab.Group{ID: 1, Name: "test-group"},
+		runners: []gitlab.Runner{
+			{ID: 1, Description: "acme-builders", Status: "online", RunnerType: "group_type", Online: true},
+			{ID: 2, Description: "shared-linux", Status: "online", RunnerType: "instance_type", Online: true},
+		},
+	}
+
+	posture, err := New(Config{Group: "test-group"}, client).Collect(context.Background(), componentsdk.LevelAudit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if posture.Runners.GroupRunnerCount != 1 {
+		t.Errorf("group_runner_count = %d, want 1", posture.Runners.GroupRunnerCount)
+	}
+	if rows := posture.Runners.PerRunner; len(rows) != 1 || rows[0].ID != 1 {
+		t.Errorf("per_runner = %+v, want only runner 1", rows)
+	}
+}
+
+func TestWebhookHost(t *testing.T) {
+	tests := []struct {
+		url  string
+		want string
+		code componentsdk.Code
+	}{
+		{"https://hooks.example.com/webhook", "hooks.example.com", ""},
+		{"https://hooks.example.com:8443/{path}?key={value}", "hooks.example.com:8443", ""},
+		{"https://{user}:{password}@hooks.example.com/webhook", "hooks.example.com", ""},
+		{"https://{tenant}.example.com/hook", "", componentsdk.CodeUnsupported},
+		{"https://hooks.example.com:{port}/hook", "", componentsdk.CodeUnsupported},
+		{"hooks.example.com/hook", "", componentsdk.CodeInvalidResponse},
+	}
+	for _, tt := range tests {
+		got, err := webhookHost(tt.url)
+		var code componentsdk.Code
+		if err != nil {
+			code = componentsdk.Classify(err)
+		}
+		if got != tt.want || code != tt.code {
+			t.Errorf("webhookHost(%q) = %q, %v; want %q with code %q", tt.url, got, err, tt.want, tt.code)
+		}
+		if err != nil && strings.Contains(err.Error(), "example.com") {
+			t.Errorf("webhookHost(%q) error %q holds the URL", tt.url, err)
+		}
+	}
+}
+
+func TestWebhookMaskedHost_LeavesTheHostOut(t *testing.T) {
+	hook := gitlab.Webhook{ID: 1, URL: "https://{tenant}.example.com/hook", EnableSSLVerification: true}
+	client := &fakeClient{
+		group:           &gitlab.Group{ID: 1, Name: "test-group"},
+		projects:        []gitlab.Project{{ID: 10, Name: "proj", DefaultBranch: "main", Visibility: "private"}},
+		groupWebhooks:   []gitlab.Webhook{hook},
+		projectWebhooks: map[int][]gitlab.Webhook{10: {hook}},
+	}
+
+	rec := &componentsdk.Recorder{}
+	posture, err := New(Config{Group: "test-group", Recorder: rec}, client).Collect(context.Background(), componentsdk.LevelInternal)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, list := range []string{"group", "project"} {
+		rows := map[string][]WebhookRow{"group": posture.Webhooks.Group, "project": posture.Webhooks.Project}[list]
+		if len(rows) != 1 || rows[0].URLHost != "" {
+			t.Errorf("%s rows = %+v, want one row without url_host", list, rows)
+		}
+		pointer := "/webhooks/" + list + "/0/url_host"
+		if g := gapAt(rec, pointer); g == nil || g.Code != componentsdk.CodeUnsupported {
+			t.Errorf("gap at %s = %+v, want unsupported", pointer, g)
+		}
 	}
 }
 
@@ -956,7 +1359,9 @@ func TestAccessLevelName(t *testing.T) {
 		{50, "owner"},
 		{40, "maintainer"},
 		{30, "developer"},
+		{25, "security_manager"},
 		{20, "reporter"},
+		{15, "planner"},
 		{10, "guest"},
 		{5, "minimal"},
 	}

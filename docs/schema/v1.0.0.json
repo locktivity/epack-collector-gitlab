@@ -1,0 +1,606 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/locktivity/epack-collector-gitlab/docs/schema/v1.0.0.json",
+  "title": "GitLab Posture Collector Output",
+  "description": "Security posture metrics for a GitLab group, from artifacts/gitlab.details.json. A value the collector could not read is null or absent, and the collector result (artifacts/gitlab.collector-result.json) has a gap for it that says why. Audit and internal fields are optional and additive.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "collected_at",
+    "collected_at_level",
+    "group",
+    "scope",
+    "posture",
+    "access_control",
+    "branch_protection_rules",
+    "security_features"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Schema version for this output format.",
+      "x-epack-label": "Schema version",
+      "x-epack-summary": "Identifies the output format version."
+    },
+    "collected_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the data was collected, in RFC 3339 UTC.",
+      "x-epack-label": "Collected at",
+      "x-epack-summary": "When the collection ran."
+    },
+    "collected_at_level": {
+      "type": "string",
+      "enum": ["trust", "audit", "internal"],
+      "description": "The collection level the artifact was gathered at. Levels are cumulative.",
+      "x-epack-label": "Collection level",
+      "x-epack-summary": "The level of detail the collection ran at. It is trust, audit, or internal."
+    },
+    "group": {
+      "type": "string",
+      "description": "The configured group path or numeric group ID.",
+      "x-epack-label": "Group",
+      "x-epack-summary": "The GitLab group this collection covers."
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The project filters and the projects they select.",
+      "x-epack-label": "What was assessed",
+      "x-epack-summary": "Which projects were included or excluded, and how much of the group that covered.",
+      "required": ["include_patterns", "exclude_patterns", "projects_coverage", "project_count", "included_project_count"],
+      "properties": {
+        "include_patterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Glob patterns matched against project names to include. Defaults to [\"*\"].",
+          "x-epack-label": "Projects included",
+          "x-epack-summary": "Glob patterns that select the projects to assess. When none are set, every project matches."
+        },
+        "exclude_patterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Glob patterns matched against project names to exclude, applied before include_patterns.",
+          "x-epack-label": "Projects excluded",
+          "x-epack-summary": "Glob patterns for projects left out of the assessment."
+        },
+        "projects_coverage": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "x-epack-denominator": "project_count",
+          "description": "Percentage of the listed projects that the filters select, rounded down. Null when the group has no projects, or when the project list could not be read.",
+          "x-epack-label": "Share of projects assessed",
+          "x-epack-summary": "Percent of the group's projects that the include and exclude patterns select.",
+          "x-epack-numerator": "included_project_count",
+          "x-epack-rounding": "floor",
+          "x-epack-method": "Divides included_project_count by project_count."
+        },
+        "project_count": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Projects in the group and its subgroups that the token can see, excluding projects shared into the group. Null when the project list could not be read.",
+          "x-epack-label": "Projects in the group",
+          "x-epack-summary": "Projects in the group and its subgroups that the token can see. Projects shared into the group from elsewhere are not counted.",
+          "x-epack-method": "Counts the projects in the group's project list, which includes subgroups and leaves out projects shared into the group."
+        },
+        "included_project_count": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Projects the filters select, archived and empty projects included. The posture, branch protection, and security feature percentages are over these. Null when the project list could not be read.",
+          "x-epack-label": "Projects assessed",
+          "x-epack-summary": "Projects the include and exclude patterns select. The branch protection and security feature percentages are taken over these projects.",
+          "x-epack-method": "Counts the listed projects whose names match an include pattern and no exclude pattern."
+        }
+      }
+    },
+    "posture": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "High-level security posture summary.",
+      "x-epack-label": "Overall protection summary",
+      "x-epack-summary": "Top-line adoption of branch protection and security features across projects.",
+      "required": ["branch_protection_coverage", "security_features_coverage"],
+      "properties": {
+        "branch_protection_coverage": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "x-epack-denominator": "/scope/included_project_count",
+          "description": "Percentage of projects whose default branch matches at least one protected branch rule, rounded down. A project without a default branch counts as unprotected. Null when no project is selected, or when any project's protected branches could not be read.",
+          "x-epack-label": "Projects with branch protection",
+          "x-epack-summary": "Percent of assessed projects whose default branch matches at least one protected branch rule.",
+          "x-epack-rounding": "floor",
+          "x-epack-method": "Lists each assessed project's protected branches and checks whether a rule's name or wildcard matches the project's default branch."
+        },
+        "security_features_coverage": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "x-epack-denominator": "/scope/included_project_count",
+          "description": "Mean of secret_push_protection and pipeline_required, rounded down. Null when no project is selected, or when either setting is unknown for any project.",
+          "x-epack-label": "Average security-feature adoption",
+          "x-epack-summary": "The average of the secret push protection and pipeline required percentages.",
+          "x-epack-rounding": "floor",
+          "x-epack-method": "Adds the projects with secret push protection to the projects that require a successful pipeline, and divides the sum by twice included_project_count."
+        }
+      }
+    },
+    "access_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Group-level access settings.",
+      "x-epack-label": "Group access settings",
+      "x-epack-summary": "Group-wide access and sharing rules.",
+      "required": ["two_factor_required"],
+      "properties": {
+        "two_factor_required": {
+          "type": ["boolean", "null"],
+          "description": "Whether the group or one of its ancestor groups requires two-factor authentication for the group's members. Null when the group response did not include the group's own setting.",
+          "x-epack-label": "Two-factor required for all members",
+          "x-epack-summary": "Whether the group or one of its ancestor groups requires two-factor authentication for the group's members.",
+          "x-epack-goal": true,
+          "x-epack-method": "Checks whether require_two_factor_authentication or require_two_factor_authentication_from_ancestor is true for the group. The ancestor setting is in the response from GitLab 19.6."
+        },
+        "project_creation_level": {
+          "type": "string",
+          "x-epack-level": "audit",
+          "description": "Who can create projects in the group, as GitLab names it, such as maintainer or developer.",
+          "x-epack-label": "Project creation level",
+          "x-epack-summary": "The minimum role required to create projects in the group."
+        },
+        "share_with_group_lock": {
+          "type": "boolean",
+          "x-epack-level": "audit",
+          "description": "Whether projects in the group are prevented from being shared with other groups.",
+          "x-epack-label": "Share with group lock",
+          "x-epack-summary": "Whether projects in the group are blocked from being shared with other groups."
+        }
+      }
+    },
+    "branch_protection_rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Percentages of projects whose default-branch protection includes each rule, rounded down. All matching protected branch rules are merged, the least restrictive grant winning. A percentage is null when no project is selected, or when the rule could not be determined for at least one project.",
+      "x-epack-label": "Code change safeguards",
+      "x-epack-summary": "How widely each default-branch safeguard is in place across projects.",
+      "required": ["merge_request_required", "approving_reviews", "code_owner_approval", "no_force_push"],
+      "properties": {
+        "merge_request_required": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "x-epack-denominator": "/scope/included_project_count",
+          "description": "Percentage of projects where no one can push to the default branch directly, so every change goes through a merge request.",
+          "x-epack-label": "Merge request required",
+          "x-epack-summary": "Percent of assessed projects where no one can push to the default branch directly. Every change then goes through a merge request.",
+          "x-epack-rounding": "floor",
+          "x-epack-method": "Checks that the protected branch rules matching each project's default branch let no role, user, group, or deploy key push."
+        },
+        "approving_reviews": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "x-epack-denominator": "/scope/included_project_count",
+          "description": "Percentage of projects whose merge requests to the default branch need at least one approval, from the project's approval settings or an approval rule that applies to the branch (Premium and above). A rule from a merge request approval policy or Coverage-Check counts only when its report type is any_merge_request.",
+          "x-epack-label": "Approving review required",
+          "x-epack-summary": "Percent of assessed projects where every merge request to the default branch needs at least one approval.",
+          "x-epack-rounding": "floor",
+          "x-epack-method": "Takes the largest of the project's approvals_before_merge and the approvals_required of each approval rule that applies to the default branch, and checks that it is at least 1. A report_approver rule counts only when its report_type is any_merge_request."
+        },
+        "code_owner_approval": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "x-epack-denominator": "/scope/included_project_count",
+          "description": "Percentage of projects whose default branch requires code owner approval. It does not check that a CODEOWNERS file exists.",
+          "x-epack-label": "Code-owner approval required",
+          "x-epack-summary": "Percent of assessed projects whose default branch requires code owner approval. A project can require it without having a CODEOWNERS file.",
+          "x-epack-rounding": "floor",
+          "x-epack-method": "Checks whether a protected branch rule matching the default branch has code_owner_approval_required set."
+        },
+        "no_force_push": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "x-epack-denominator": "/scope/included_project_count",
+          "description": "Percentage of projects whose default branch is protected and blocks force pushes.",
+          "x-epack-label": "Force push blocked",
+          "x-epack-summary": "Percent of assessed projects whose default branch is protected and blocks force pushes.",
+          "x-epack-rounding": "floor",
+          "x-epack-method": "Checks that a protected branch rule matches the default branch and that no matching rule has allow_force_push set."
+        }
+      }
+    },
+    "security_features": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Percentages of projects with each security setting enabled, rounded down.",
+      "x-epack-label": "Security feature coverage",
+      "x-epack-summary": "How widely automated security features are enabled across projects.",
+      "required": ["secret_push_protection", "pipeline_required"],
+      "properties": {
+        "secret_push_protection": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "x-epack-denominator": "/scope/included_project_count",
+          "description": "Percentage of projects with secret push protection enabled. GitLab reports the setting with Ultimate, to the Developer role and above. Null when no project is selected, or when any project did not report the setting.",
+          "x-epack-label": "Secret push protection",
+          "x-epack-summary": "Percent of assessed projects with secret push protection enabled.",
+          "x-epack-rounding": "floor",
+          "x-epack-method": "Reads secret_push_protection_enabled for each assessed project from the group's project list."
+        },
+        "pipeline_required": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "x-epack-denominator": "/scope/included_project_count",
+          "description": "Percentage of projects that only allow a merge when the pipeline succeeds (only_allow_merge_if_pipeline_succeeds). Null when no project is selected, or when any project did not report the setting.",
+          "x-epack-label": "Pipeline required",
+          "x-epack-summary": "Percent of assessed projects that allow a merge only when the pipeline succeeds.",
+          "x-epack-rounding": "floor",
+          "x-epack-method": "Reads only_allow_merge_if_pipeline_succeeds for each assessed project from the group's project list."
+        }
+      }
+    },
+    "members": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-epack-level": "audit",
+      "description": "Group members, direct and inherited, as the token can see them.",
+      "x-epack-label": "Member inventory",
+      "x-epack-summary": "Counts of members by role and per-member detail.",
+      "required": ["total_count", "owner_count", "maintainer_count", "developer_count", "per_member"],
+      "properties": {
+        "total_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_member", "as": "count", "truncated": "truncated" },
+          "description": "Members, counted before rows are capped.",
+          "x-epack-label": "Members",
+          "x-epack-summary": "Members of the group, direct and inherited."
+        },
+        "owner_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_member", "where": "/role", "equals": "owner", "as": "count", "truncated": "truncated" },
+          "description": "Members with access level 50 or above.",
+          "x-epack-label": "Owners",
+          "x-epack-summary": "Members with the Owner role."
+        },
+        "maintainer_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_member", "where": "/role", "equals": "maintainer", "as": "count", "truncated": "truncated" },
+          "description": "Members with access level 40 to 49.",
+          "x-epack-label": "Maintainers",
+          "x-epack-summary": "Members with the Maintainer role."
+        },
+        "developer_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_member", "where": "/role", "equals": "developer", "as": "count", "truncated": "truncated" },
+          "description": "Members with access level 30 to 39.",
+          "x-epack-label": "Developers",
+          "x-epack-summary": "Members with the Developer role."
+        },
+        "per_member": {
+          "type": "array",
+          "description": "One row per member, highest access level first when capped at 10,000.",
+          "x-epack-label": "Per-member rows",
+          "x-epack-summary": "One row per member, with role and two-factor status.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["username", "role", "access_level", "two_factor_enabled"],
+            "properties": {
+              "username": { "type": "string", "x-epack-label": "Username", "x-epack-summary": "GitLab username for this member." },
+              "name": { "type": "string", "x-epack-label": "Display name", "x-epack-summary": "The member's display name." },
+              "role": { "type": "string", "enum": ["owner", "maintainer", "developer", "security_manager", "reporter", "planner", "guest", "minimal"], "description": "The GitLab role for the member's access level. security_manager is the Security Manager role at level 25, and planner is the Planner role at level 15.", "x-epack-label": "Role", "x-epack-summary": "The member's role, named from its access level." },
+              "access_level": { "type": "integer", "x-epack-label": "Access level", "x-epack-summary": "GitLab's numeric access level for the member, such as 30 for Developer or 50 for Owner." },
+              "two_factor_enabled": {
+                "type": ["boolean", "null"],
+                "x-epack-null": "GitLab returns a member's two-factor status only to group Owners and administrators, from GitLab 19.4, so null means GitLab did not say",
+                "description": "Whether the member has two-factor authentication enabled. Null means unknown, not disabled.",
+                "x-epack-label": "Two-factor enabled",
+                "x-epack-summary": "Whether this member has two-factor authentication enabled.",
+                "x-epack-goal": true
+              },
+              "state": { "type": "string", "x-epack-label": "State", "x-epack-summary": "Account state, for example active." }
+            }
+          }
+        },
+        "truncated": { "type": "boolean", "description": "Present and true when per_member was capped.", "x-epack-label": "Member list capped", "x-epack-summary": "True when the member rows were capped at 10,000." },
+        "truncated_dropped": { "type": "integer", "minimum": 1, "description": "Rows left out of per_member by the cap.", "x-epack-label": "Members omitted", "x-epack-summary": "Member rows left out by the cap." }
+      }
+    },
+    "projects": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-epack-level": "audit",
+      "description": "Inventory of the projects the filters select.",
+      "x-epack-label": "Project inventory",
+      "x-epack-summary": "Counts of projects by visibility and protection.",
+      "required": ["total_count", "public_count", "private_count", "internal_count", "archived_count", "per_project"],
+      "properties": {
+        "total_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_project", "as": "count", "truncated": "truncated" },
+          "description": "Selected projects, counted before rows are capped.",
+          "x-epack-label": "Projects",
+          "x-epack-summary": "Number of assessed projects."
+        },
+        "public_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_project", "where": "/visibility", "equals": "public", "as": "count", "truncated": "truncated" },
+          "x-epack-label": "Public projects",
+          "x-epack-summary": "Assessed projects with public visibility."
+        },
+        "private_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_project", "where": "/visibility", "equals": "private", "as": "count", "truncated": "truncated" },
+          "x-epack-label": "Private projects",
+          "x-epack-summary": "Assessed projects with private visibility."
+        },
+        "internal_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_project", "where": "/visibility", "equals": "internal", "as": "count", "truncated": "truncated" },
+          "x-epack-label": "Internal projects",
+          "x-epack-summary": "Assessed projects with internal visibility."
+        },
+        "archived_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_project", "where": "/archived", "equals": true, "as": "count", "truncated": "truncated" },
+          "x-epack-label": "Archived projects",
+          "x-epack-summary": "Assessed projects that are archived."
+        },
+        "per_project": {
+          "type": "array",
+          "description": "One row per project, private before internal before public when capped at 5,000.",
+          "x-epack-label": "Per-project rows",
+          "x-epack-summary": "One row per project with visibility and default-branch protection detail.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "path_with_namespace", "visibility", "archived"],
+            "properties": {
+              "name": { "type": "string", "x-epack-label": "Name", "x-epack-summary": "Project name." },
+              "path_with_namespace": { "type": "string", "x-epack-label": "Full path", "x-epack-summary": "Full project path including group and subgroup." },
+              "visibility": { "type": "string", "x-epack-label": "Visibility", "x-epack-summary": "Whether the project is public, private, or internal." },
+              "archived": { "type": "boolean", "x-epack-label": "Archived", "x-epack-summary": "Whether the project is archived (read-only)." },
+              "default_branch": { "type": "string", "description": "Absent for a project with no commits.", "x-epack-label": "Default branch", "x-epack-summary": "Name of the default branch the protection detail describes." },
+              "created_at": { "type": "string", "format": "date-time", "x-epack-label": "Created", "x-epack-summary": "When the project was created." },
+              "last_activity_at": { "type": "string", "format": "date-time", "x-epack-label": "Last activity", "x-epack-summary": "When the project last had activity." },
+              "merge_method": { "type": "string", "x-epack-label": "Merge method", "x-epack-summary": "The merge strategy configured for the project (for example ff or rebase_merge)." },
+              "branch_protection": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "The merged protection of the rules matching the default branch. Absent when no rule matches or the project has no default branch; a gap marks a project whose rules could not be read.",
+                "x-epack-label": "Default-branch protection",
+                "x-epack-summary": "The default branch's protection settings for this project.",
+                "required": ["allow_force_push", "code_owner_approval_required", "merge_access_restricted", "push_access_restricted", "merge_request_required"],
+                "properties": {
+                  "allow_force_push": { "type": "boolean", "x-epack-label": "Force push allowed", "x-epack-summary": "Whether a rule matching the default branch allows force pushes. Force pushes can rewrite the branch's history.", "x-epack-goal": false },
+                  "code_owner_approval_required": { "type": "boolean", "x-epack-label": "Code-owner approval required", "x-epack-summary": "Whether a rule matching the default branch requires code owner approval.", "x-epack-goal": true },
+                  "merge_access_restricted": { "type": "boolean", "x-epack-label": "Merge access restricted", "x-epack-summary": "True when a rule matching the default branch gives merge access to a role. False when the rules let no one merge." },
+                  "push_access_restricted": { "type": "boolean", "x-epack-label": "Push access restricted", "x-epack-summary": "True when a rule matching the default branch gives push access to a role. False when the rules let no one push." },
+                  "merge_request_required": { "type": "boolean", "x-epack-label": "Merge request required", "x-epack-summary": "Whether the rules matching the default branch let no one push to it directly.", "x-epack-goal": true }
+                }
+              },
+              "approval_settings": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Approval requirements for merge requests to the default branch. Absent when no approval is required; a gap marks a project whose approval settings or rules could not be read.",
+                "x-epack-label": "Approval rules",
+                "x-epack-summary": "Merge request approval configuration for this project.",
+                "required": ["approvals_required", "reset_approvals_on_push", "merge_requests_disable_committers_approval"],
+                "properties": {
+                  "approvals_required": { "type": "integer", "minimum": 1, "description": "The largest approval count the project settings or an applicable rule requires. A rule from a merge request approval policy or Coverage-Check counts only when its report type is any_merge_request.", "x-epack-label": "Approvals required", "x-epack-summary": "The most approvals that the project settings or an approval rule for the default branch require on every merge request." },
+                  "reset_approvals_on_push": { "type": "boolean", "x-epack-label": "Approvals reset on push", "x-epack-summary": "Whether approvals are reset when new commits are pushed.", "x-epack-goal": true },
+                  "merge_requests_disable_committers_approval": { "type": "boolean", "x-epack-label": "Committer self-approval blocked", "x-epack-summary": "Whether people who added commits to a merge request are blocked from approving it.", "x-epack-goal": true }
+                }
+              }
+            }
+          }
+        },
+        "truncated": { "type": "boolean", "description": "Present and true when per_project was capped.", "x-epack-label": "Project list capped", "x-epack-summary": "True when the project rows were capped at 5,000." },
+        "truncated_dropped": { "type": "integer", "minimum": 1, "description": "Rows left out of per_project by the cap.", "x-epack-label": "Projects omitted", "x-epack-summary": "Project rows left out by the cap." }
+      }
+    },
+    "webhooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-epack-level": "audit",
+      "description": "Group and project webhooks. Rows appear at internal.",
+      "x-epack-label": "Outbound connections",
+      "x-epack-summary": "Automated connections that send activity to outside systems. Only the destination host is retained.",
+      "required": ["group_count", "project_count"],
+      "properties": {
+        "group_count": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "group", "as": "count" },
+          "description": "Group webhooks (Premium and above, Owner). Null when they could not be read.",
+          "x-epack-label": "Group webhooks",
+          "x-epack-summary": "Number of group-level webhooks."
+        },
+        "project_count": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "project", "as": "count" },
+          "description": "Webhooks across the selected projects (Maintainer and above). Null when any project's webhooks could not be read.",
+          "x-epack-label": "Project webhooks",
+          "x-epack-summary": "Total project-level webhooks across in-scope projects."
+        },
+        "group": {
+          "type": "array",
+          "x-epack-level": "internal",
+          "items": { "$ref": "#/$defs/webhook" },
+          "x-epack-label": "Group webhook rows",
+          "x-epack-summary": "One row per group-level webhook, with destination host and status."
+        },
+        "project": {
+          "type": "array",
+          "x-epack-level": "internal",
+          "items": { "$ref": "#/$defs/webhook" },
+          "x-epack-label": "Project webhook rows",
+          "x-epack-summary": "One row per project-level webhook, with destination host and status."
+        }
+      }
+    },
+    "deploy_keys": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-epack-level": "audit",
+      "description": "Deploy keys enabled on the selected projects, one per project and key. Rows appear at internal.",
+      "x-epack-label": "Project access keys",
+      "x-epack-summary": "SSH keys that grant direct access to projects. Key material is never included.",
+      "required": ["total_count", "read_write_count"],
+      "properties": {
+        "total_count": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_key", "as": "count" },
+          "description": "Deploy keys across projects. Null when any project's keys could not be read.",
+          "x-epack-label": "Deploy keys",
+          "x-epack-summary": "Total deploy keys across in-scope projects."
+        },
+        "read_write_count": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_key", "where": "/read_only", "equals": false, "as": "count" },
+          "description": "Deploy keys that can push. Null when any project's keys could not be read.",
+          "x-epack-label": "Read-write deploy keys",
+          "x-epack-summary": "How many deploy keys grant write (push) access.",
+          "x-epack-goal": "lower"
+        },
+        "per_key": {
+          "type": "array",
+          "x-epack-level": "internal",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["project", "id", "read_only"],
+            "properties": {
+              "project": { "type": "string", "x-epack-label": "Project", "x-epack-summary": "The project the deploy key is enabled on." },
+              "id": { "type": "integer", "x-epack-label": "Key ID", "x-epack-summary": "GitLab's numeric identifier for this deploy key." },
+              "title": { "type": "string", "x-epack-label": "Title", "x-epack-summary": "The deploy key's title." },
+              "read_only": { "type": "boolean", "x-epack-label": "Read-only", "x-epack-summary": "Whether the key is read-only. A read-write deploy key can push code.", "x-epack-goal": true },
+              "fingerprint": { "type": "string", "description": "The MD5 fingerprint, when GitLab returns one.", "x-epack-label": "Key fingerprint", "x-epack-summary": "A fingerprint of the public key for identification. The key itself is never emitted." },
+              "created_at": { "type": "string", "format": "date-time", "x-epack-label": "Created", "x-epack-summary": "When the deploy key was added." }
+            }
+          },
+          "x-epack-label": "Per-key rows",
+          "x-epack-summary": "One row per deploy key, with its project, access level, and key fingerprint."
+        }
+      }
+    },
+    "runners": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-epack-level": "audit",
+      "description": "Group runners available to the group, including those of its ancestor groups. Instance runners are not included.",
+      "x-epack-label": "CI/CD runners",
+      "x-epack-summary": "Group runners that execute CI/CD pipelines.",
+      "required": ["group_runner_count", "per_runner"],
+      "properties": {
+        "group_runner_count": {
+          "type": "integer",
+          "minimum": 0,
+          "x-epack-rollup": { "rows": "per_runner", "as": "count" },
+          "x-epack-label": "Group runners",
+          "x-epack-summary": "Number of group-level runners."
+        },
+        "per_runner": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "online", "paused"],
+            "properties": {
+              "id": { "type": "integer", "x-epack-label": "Runner ID", "x-epack-summary": "GitLab's numeric identifier for this runner." },
+              "name": { "type": "string", "x-epack-label": "Name", "x-epack-summary": "The runner's description." },
+              "status": { "type": "string", "x-epack-label": "Status", "x-epack-summary": "The runner's status, such as online, offline, or stale." },
+              "type": { "type": "string", "x-epack-label": "Type", "x-epack-summary": "The runner's type, which is group_type for every row." },
+              "online": { "type": "boolean", "x-epack-label": "Online", "x-epack-summary": "Whether the runner is currently online." },
+              "paused": { "type": "boolean", "x-epack-label": "Paused", "x-epack-summary": "Whether the runner is paused." },
+              "tags": { "type": "array", "items": { "type": "string" }, "description": "Present only when the list endpoint returns tags.", "x-epack-label": "Tags", "x-epack-summary": "Tags that route CI/CD jobs to this runner." }
+            }
+          },
+          "x-epack-label": "Per-runner rows",
+          "x-epack-summary": "One row per group runner, with status and configuration."
+        }
+      }
+    },
+    "audit_log": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-epack-level": "internal",
+      "description": "Group audit events from the last window_days days (Premium and above). A Developer or Maintainer receives only their own events.",
+      "x-epack-label": "Recent activity log",
+      "x-epack-summary": "A rolling seven-day window of audit events.",
+      "required": ["window_days", "count_by_action", "events"],
+      "properties": {
+        "window_days": { "type": "integer", "minimum": 1, "x-epack-label": "Lookback window (days)", "x-epack-summary": "How many days of audit events the log covers." },
+        "count_by_action": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1, "x-epack-label": "Events", "x-epack-summary": "Events in the window with this custom message." },
+          "description": "Events per custom message, verbatim; events without one count as unknown. Counted before rows are capped.",
+          "x-epack-label": "Events by action",
+          "x-epack-summary": "How many events in the window have each custom message. Events without one count as unknown."
+        },
+        "events": {
+          "type": "array",
+          "description": "Event rows, capped at 5,000.",
+          "x-epack-label": "Audit events",
+          "x-epack-summary": "One row per audit event in the window.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action", "timestamp"],
+            "properties": {
+              "action": { "type": "string", "x-epack-label": "Action", "x-epack-summary": "The event's custom message, or unknown when it has none." },
+              "actor": { "type": "string", "x-epack-label": "Actor", "x-epack-summary": "Name of whoever performed the action." },
+              "timestamp": { "type": "integer", "description": "Unix seconds.", "x-epack-label": "Timestamp", "x-epack-summary": "When the event occurred, in Unix seconds." }
+            }
+          }
+        },
+        "truncated": { "type": "boolean", "description": "Present and true when events was capped.", "x-epack-label": "Event list capped", "x-epack-summary": "True when the event rows were capped at 5,000." },
+        "truncated_dropped": { "type": "integer", "minimum": 1, "description": "Rows left out of events by the cap.", "x-epack-label": "Events omitted", "x-epack-summary": "Event rows left out by the cap." }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Human-readable notes on surfaces that could not be read, kept for readers that parse them. The collector result's gaps are the machine-readable record.",
+      "x-epack-label": "Collection gaps",
+      "x-epack-summary": "Notes on what could not be read, and why.",
+      "properties": {
+        "permission_errors": { "type": "array", "items": { "type": "string" }, "x-epack-label": "Permission gaps", "x-epack-summary": "Notes on surfaces the token was not allowed to read." },
+        "warnings": { "type": "array", "items": { "type": "string" }, "x-epack-label": "Other collection notes", "x-epack-summary": "Notes on surfaces that could not be read for other reasons, such as a GitLab tier without the feature or a failed request." }
+      }
+    }
+  },
+  "$defs": {
+    "webhook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "active", "ssl_verify"],
+      "properties": {
+        "project": { "type": "string", "description": "The project's name, for a project webhook.", "x-epack-label": "Project", "x-epack-summary": "Which project owns this webhook." },
+        "id": { "type": "integer", "x-epack-label": "Webhook ID", "x-epack-summary": "GitLab's numeric identifier for this webhook." },
+        "active": { "type": "boolean", "description": "False when GitLab has disabled the webhook.", "x-epack-label": "Active", "x-epack-summary": "False when the webhook is permanently disabled after failed deliveries." },
+        "url_host": { "type": "string", "description": "The destination host, with its port when the URL has one. The full URL is never emitted. Absent, with an unsupported gap, when part of the host is masked.", "x-epack-label": "Destination host", "x-epack-summary": "The host that receives the webhook's payloads. The full URL is never written." },
+        "ssl_verify": { "type": "boolean", "x-epack-label": "SSL verification", "x-epack-summary": "Whether SSL certificate verification is enabled for deliveries.", "x-epack-goal": true }
+      }
+    }
+  }
+}

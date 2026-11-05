@@ -2,7 +2,10 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"slices"
 	"time"
 
 	"github.com/locktivity/epack-collector-gitlab/internal/gitlab"
@@ -11,42 +14,14 @@ import (
 
 const auditLogWindowDays = 7
 
-func (c *Collector) collectSurfaces(ctx context.Context, posture *GroupPosture, group *gitlab.Group, projects []gitlab.Project, metrics *projectMetrics, level componentsdk.Level, groupSettingsAvailable bool, diag *diagnosticsTracker) error {
-	if !level.AtLeast(componentsdk.LevelAudit) {
-		return nil
-	}
+var errNoCreatedAt = componentsdk.CodeError(componentsdk.CodeInvalidResponse, errors.New("an audit event in the response has no created_at"))
 
-	if groupSettingsAvailable {
-		posture.AccessControl.ProjectCreationLevel = group.ProjectCreationLevel
-		shareWithGroupLock := group.ShareWithGroupLock
-		posture.AccessControl.ShareWithGroupLock = &shareWithGroupLock
-	}
-
-	c.collectProjects(posture, projects, metrics)
-	if err := c.collectMembers(ctx, posture, diag); err != nil {
-		return err
-	}
-	if err := c.collectWebhooks(ctx, posture, projects, level, diag); err != nil {
-		return err
-	}
-	if err := c.collectDeployKeys(ctx, posture, projects, level, diag); err != nil {
-		return err
-	}
-	if err := c.collectRunners(ctx, posture, diag); err != nil {
-		return err
-	}
-
-	if level.AtLeast(componentsdk.LevelInternal) {
-		if err := c.collectAuditLog(ctx, posture, diag); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
+// collectProjects builds the audit-level project inventory. A row whose
+// branch protection or approval settings could not be read leaves them out,
+// with a gap.
 func (c *Collector) collectProjects(posture *GroupPosture, projects []gitlab.Project, metrics *projectMetrics) {
 	pub, priv, internal, archived := 0, 0, 0, 0
-	var rows []ProjectRow
+	rows := make([]ProjectRow, 0, len(projects))
 
 	for _, p := range projects {
 		switch p.Visibility {
@@ -75,16 +50,24 @@ func (c *Collector) collectProjects(posture *GroupPosture, projects []gitlab.Pro
 		if p.LastActivityAt != nil {
 			row.LastActivityAt = p.LastActivityAt.Format(time.RFC3339)
 		}
-		if bp, ok := metrics.branchProtections[p.ID]; ok {
-			row.BranchProtection = bp
-		}
-		if ad, ok := metrics.approvalDetails[p.ID]; ok {
-			row.ApprovalSettings = ad
+		if r := metrics.results[p.ID]; r != nil {
+			row.BranchProtection = r.protection
+			row.ApprovalSettings = r.approval
+			row.protectionErr = r.protectionErr
+			row.approvalErr = r.approvalErr
 		}
 		rows = append(rows, row)
 	}
 
 	t := truncateProjects(rows)
+	for i, row := range t.items {
+		if row.protectionErr != nil {
+			c.gaps.leaveOut(row.protectionErr, rowPointer("/projects/per_project", i, "branch_protection"))
+		}
+		if row.approvalErr != nil {
+			c.gaps.leaveOut(row.approvalErr, rowPointer("/projects/per_project", i, "approval_settings"))
+		}
+	}
 	posture.Projects = &Projects{
 		TotalCount:       len(projects),
 		PublicCount:      pub,
@@ -97,27 +80,29 @@ func (c *Collector) collectProjects(posture *GroupPosture, projects []gitlab.Pro
 	}
 }
 
-func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, diag *diagnosticsTracker) error {
+// readMembers reads the group's members once, for the detailed artifact and
+// the access-posture artifact.
+func (c *Collector) readMembers(ctx context.Context) {
 	c.status("Fetching members...")
+	c.reads.members, c.reads.membersErr = c.client.ListGroupMembers(ctx, c.config.Group)
+}
 
-	members, err := c.client.ListGroupMembers(ctx, c.config.Group)
+// collectMembers builds the audit-level member inventory from the members
+// readMembers read.
+func (c *Collector) collectMembers(posture *GroupPosture) {
+	members, err := c.reads.members, c.reads.membersErr
 	if err != nil {
-		if isContextError(err) {
-			return err
-		}
-		if isUnauthorized(err) {
-			return errAuthFailed
-		}
-		if isDenied(err) {
-			diag.surfacePermissionDenied("members", "permission denied (requires read_api scope)")
+		if gitlab.StatusOf(err) == http.StatusForbidden {
+			c.diag.surfacePermissionDenied("members", "permission denied (requires read_api scope)")
 		} else {
-			diag.surfaceUnavailable("members", "fetch failed: "+safeDiagError(err))
+			c.diag.surfaceUnavailable("members", "fetch failed: "+safeDiagError(err))
 		}
-		return nil
+		c.gaps.leaveOut(err, "/members")
+		return
 	}
 
 	owners, maintainers, developers := 0, 0, 0
-	var rows []MemberRow
+	rows := make([]MemberRow, 0, len(members))
 
 	for _, m := range members {
 		switch {
@@ -137,7 +122,6 @@ func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, d
 			TwoFactorEnabled: m.TwoFactorEnabled,
 			State:            m.State,
 		})
-
 	}
 
 	t := truncateMembers(rows)
@@ -150,104 +134,152 @@ func (c *Collector) collectMembers(ctx context.Context, posture *GroupPosture, d
 		Truncated:        t.truncated,
 		TruncatedDropped: t.truncatedDropped,
 	}
-	return nil
 }
 
-func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, projects []gitlab.Project, level componentsdk.Level, diag *diagnosticsTracker) error {
+// collectWebhooks counts group and project webhooks, with rows at internal.
+// When any project's hooks could not be read, the project count and rows
+// are left out, since the rest no longer describe the group.
+func (c *Collector) collectWebhooks(ctx context.Context, posture *GroupPosture, projects []gitlab.Project, projectsErr error, level componentsdk.Level) {
 	c.status("Fetching webhooks...")
+	internal := level.AtLeast(componentsdk.LevelInternal)
+	hooks := &Webhooks{}
 
-	groupCount := 0
-	var groupRows []WebhookRow
 	groupHooks, err := c.client.ListGroupWebhooks(ctx, c.config.Group)
 	if err != nil {
-		if isContextError(err) {
-			return err
-		}
-		if isUnauthorized(err) {
-			return errAuthFailed
-		}
-		if isDenied(err) {
-			diag.tierRequired("group_webhooks", "Premium")
+		if gitlab.StatusOf(err) == http.StatusForbidden {
+			c.diag.tierRequired("group_webhooks", "Premium")
 		} else {
-			diag.surfaceUnavailable("group_webhooks", "fetch failed: "+safeDiagError(err))
+			c.diag.surfaceUnavailable("group_webhooks", "fetch failed: "+safeDiagError(err))
+		}
+		c.gaps.leaveOut(err, "/webhooks/group_count")
+		if internal {
+			c.gaps.leaveOut(err, "/webhooks/group")
 		}
 	} else {
-		groupCount = len(groupHooks)
-		if level.AtLeast(componentsdk.LevelInternal) {
+		count := len(groupHooks)
+		hooks.GroupCount = &count
+		if internal {
+			hooks.Group = make([]WebhookRow, 0, len(groupHooks))
 			for _, h := range groupHooks {
-				groupRows = append(groupRows, WebhookRow{
-					ID:        h.ID,
-					Active:    h.AlertStatus != "disabled",
-					URLHost:   webhookHost(h.URL),
-					SSLVerify: h.EnableSSLVerification,
-				})
+				hooks.Group = append(hooks.Group, webhookRow("", h))
+			}
+			c.leaveOutHosts("/webhooks/group", hooks.Group)
+		}
+	}
+
+	// A failed project list already left the project count and rows out.
+	if projectsErr == nil {
+		count, failed := 0, 0
+		var firstErr error
+		rows := []WebhookRow{}
+		for _, p := range projects {
+			projectHooks, err := c.client.ListProjectWebhooks(ctx, p.ID)
+			if err != nil {
+				if ctx.Err() == nil {
+					c.diag.surfaceUnavailable("project_webhooks", fmt.Sprintf("project %s: fetch failed", p.Name))
+				}
+				failed++
+				firstErr = firstError(firstErr, err)
+				continue
+			}
+			count += len(projectHooks)
+			if internal {
+				for _, h := range projectHooks {
+					rows = append(rows, webhookRow(p.Name, h))
+				}
+			}
+		}
+		if failed > 0 {
+			c.gaps.partial(failed, firstErr, "/webhooks/project_count")
+			if internal {
+				c.gaps.leaveOut(firstErr, "/webhooks/project")
+			}
+		} else {
+			hooks.ProjectCount = &count
+			if internal {
+				hooks.Project = rows
+				c.leaveOutHosts("/webhooks/project", rows)
 			}
 		}
 	}
 
-	projectCount := 0
-	var projectRows []WebhookRow
-	for _, p := range projects {
-		hooks, err := c.client.ListProjectWebhooks(ctx, p.ID)
-		if err != nil {
-			if isContextError(err) {
-				return err
-			}
-			if isUnauthorized(err) {
-				return errAuthFailed
-			}
-			diag.surfaceUnavailable("project_webhooks", fmt.Sprintf("project %s: fetch failed", p.Name))
-			continue
-		}
-		projectCount += len(hooks)
-		if level.AtLeast(componentsdk.LevelInternal) {
-			for _, h := range hooks {
-				projectRows = append(projectRows, WebhookRow{
-					Project:   p.Name,
-					ID:        h.ID,
-					Active:    h.AlertStatus != "disabled",
-					URLHost:   webhookHost(h.URL),
-					SSLVerify: h.EnableSSLVerification,
-				})
-			}
-		}
-	}
-
-	posture.Webhooks = &Webhooks{
-		GroupCount:   groupCount,
-		ProjectCount: projectCount,
-		Group:        groupRows,
-		Project:      projectRows,
-	}
-	return nil
+	posture.Webhooks = hooks
 }
 
-func (c *Collector) collectDeployKeys(ctx context.Context, posture *GroupPosture, projects []gitlab.Project, level componentsdk.Level, diag *diagnosticsTracker) error {
+func webhookRow(project string, h gitlab.Webhook) WebhookRow {
+	host, hostErr := webhookHost(h.URL)
+	return WebhookRow{
+		Project:   project,
+		ID:        h.ID,
+		Active:    h.AlertStatus != "disabled",
+		URLHost:   host,
+		SSLVerify: h.EnableSSLVerification,
+		hostErr:   hostErr,
+	}
+}
+
+// leaveOutHosts records a gap for each row in list whose url_host is not
+// known.
+func (c *Collector) leaveOutHosts(list string, rows []WebhookRow) {
+	for i, row := range rows {
+		if row.hostErr != nil {
+			c.gaps.leaveOut(row.hostErr, rowPointer(list, i, "url_host"))
+		}
+	}
+}
+
+// readDeployKeys reads each assessed project's deploy keys once, for the
+// detailed artifact and the access-posture artifact.
+func (c *Collector) readDeployKeys(ctx context.Context, projects []gitlab.Project) {
 	c.status("Fetching deploy keys...")
+	c.reads.deployKeys = readEachProject(ctx, projects, c.client.ListProjectDeployKeys)
+}
 
-	totalCount, readWriteCount := 0, 0
-	var rows []DeployKeyRow
-
+// readEachProject calls list for each project, and counts the projects whose
+// call failed. It names each project whose call failed before the run ran
+// out of time.
+func readEachProject[T any](ctx context.Context, projects []gitlab.Project, list func(context.Context, int) ([]T, error)) projectLists[T] {
+	var out projectLists[T]
 	for _, p := range projects {
-		keys, err := c.client.ListProjectDeployKeys(ctx, p.ID)
+		items, err := list(ctx, p.ID)
 		if err != nil {
-			if isContextError(err) {
-				return err
+			out.failed++
+			out.err = firstError(out.err, err)
+			if ctx.Err() == nil {
+				out.failedNames = append(out.failedNames, p.Name)
 			}
-			if isUnauthorized(err) {
-				return errAuthFailed
-			}
-			diag.surfaceUnavailable("deploy_keys", fmt.Sprintf("project %s: fetch failed", p.Name))
 			continue
 		}
-		for _, k := range keys {
+		out.lists = append(out.lists, projectList[T]{project: p, items: items})
+	}
+	return out
+}
+
+// collectDeployKeys counts the deploy keys readDeployKeys read across
+// projects, with rows at internal. When any project's keys could not be
+// read, the counts and rows are left out.
+func (c *Collector) collectDeployKeys(posture *GroupPosture, projectsErr error, level componentsdk.Level) {
+	// A failed project list already left deploy_keys out.
+	if projectsErr != nil {
+		return
+	}
+	internal := level.AtLeast(componentsdk.LevelInternal)
+	keys := c.reads.deployKeys
+	for _, name := range keys.failedNames {
+		c.diag.surfaceUnavailable("deploy_keys", fmt.Sprintf("project %s: fetch failed", name))
+	}
+
+	totalCount, readWriteCount := 0, 0
+	rows := []DeployKeyRow{}
+	for _, list := range keys.lists {
+		for _, k := range list.items {
 			totalCount++
 			if k.CanPush {
 				readWriteCount++
 			}
-			if level.AtLeast(componentsdk.LevelInternal) {
+			if internal {
 				row := DeployKeyRow{
-					Project:     p.Name,
+					Project:     list.project.Name,
 					ID:          k.ID,
 					Title:       k.Title,
 					ReadOnly:    !k.CanPush,
@@ -261,35 +293,43 @@ func (c *Collector) collectDeployKeys(ctx context.Context, posture *GroupPosture
 		}
 	}
 
-	posture.DeployKeys = &DeployKeys{
-		TotalCount:     totalCount,
-		ReadWriteCount: readWriteCount,
-		PerKey:         rows,
+	deployKeys := &DeployKeys{}
+	if keys.failed > 0 {
+		c.gaps.partial(keys.failed, keys.err, "/deploy_keys/total_count", "/deploy_keys/read_write_count")
+		if internal {
+			c.gaps.leaveOut(keys.err, "/deploy_keys/per_key")
+		}
+	} else {
+		deployKeys.TotalCount = &totalCount
+		deployKeys.ReadWriteCount = &readWriteCount
+		if internal {
+			deployKeys.PerKey = rows
+		}
 	}
-	return nil
+	posture.DeployKeys = deployKeys
 }
 
-func (c *Collector) collectRunners(ctx context.Context, posture *GroupPosture, diag *diagnosticsTracker) error {
+// collectRunners counts the group runners available to the group. A runner
+// of another type in the list, such as an instance runner, is not counted.
+func (c *Collector) collectRunners(ctx context.Context, posture *GroupPosture) {
 	c.status("Fetching runners...")
 
 	runners, err := c.client.ListGroupRunners(ctx, c.config.Group)
 	if err != nil {
-		if isContextError(err) {
-			return err
-		}
-		if isUnauthorized(err) {
-			return errAuthFailed
-		}
-		if isDenied(err) {
-			diag.surfacePermissionDenied("runners", "permission denied (requires Maintainer role or above)")
+		if gitlab.StatusOf(err) == http.StatusForbidden {
+			c.diag.surfacePermissionDenied("runners", "permission denied (requires Maintainer role or above)")
 		} else {
-			diag.surfaceUnavailable("runners", "fetch failed: "+safeDiagError(err))
+			c.diag.surfaceUnavailable("runners", "fetch failed: "+safeDiagError(err))
 		}
-		return nil
+		c.gaps.leaveOut(err, "/runners")
+		return
 	}
 
-	var rows []RunnerRow
+	rows := make([]RunnerRow, 0, len(runners))
 	for _, r := range runners {
+		if r.RunnerType != "group_type" {
+			continue
+		}
 		rows = append(rows, RunnerRow{
 			ID:     r.ID,
 			Name:   r.Description, // LINT-ALLOW: runner description is a display name, not customer content
@@ -302,34 +342,31 @@ func (c *Collector) collectRunners(ctx context.Context, posture *GroupPosture, d
 	}
 
 	posture.Runners = &Runners{
-		GroupRunnerCount: len(runners),
+		GroupRunnerCount: len(rows),
 		PerRunner:        rows,
 	}
-	return nil
 }
 
-func (c *Collector) collectAuditLog(ctx context.Context, posture *GroupPosture, diag *diagnosticsTracker) error {
+func (c *Collector) collectAuditLog(ctx context.Context, posture *GroupPosture) {
 	c.status("Fetching audit events...")
 
-	since := time.Now().UTC().AddDate(0, 0, -auditLogWindowDays)
+	since := c.now().UTC().AddDate(0, 0, -auditLogWindowDays)
 	events, err := c.client.ListGroupAuditEvents(ctx, c.config.Group, since)
+	if err == nil && slices.ContainsFunc(events, func(e gitlab.AuditEvent) bool { return e.CreatedAt == nil }) {
+		err = errNoCreatedAt
+	}
 	if err != nil {
-		if isContextError(err) {
-			return err
-		}
-		if isUnauthorized(err) {
-			return errAuthFailed
-		}
-		if isDenied(err) {
-			diag.tierRequired("audit_events", "Premium")
+		if gitlab.StatusOf(err) == http.StatusForbidden {
+			c.diag.tierRequired("audit_events", "Premium")
 		} else {
-			diag.surfaceUnavailable("audit_events", "fetch failed: "+safeDiagError(err))
+			c.diag.surfaceUnavailable("audit_events", "fetch failed: "+safeDiagError(err))
 		}
-		return nil
+		c.gaps.leaveOut(err, "/audit_log")
+		return
 	}
 
 	countByAction := make(map[string]int)
-	var rows []AuditLogRow
+	rows := make([]AuditLogRow, 0, len(events))
 
 	for _, e := range events {
 		action := e.Details.CustomMessage
@@ -360,7 +397,6 @@ func (c *Collector) collectAuditLog(ctx context.Context, posture *GroupPosture, 
 		Truncated:        truncated,
 		TruncatedDropped: truncatedDropped,
 	}
-	return nil
 }
 
 func accessLevelName(level int) string {
@@ -371,8 +407,12 @@ func accessLevelName(level int) string {
 		return "maintainer"
 	case level >= 30:
 		return "developer"
+	case level >= 25:
+		return "security_manager"
 	case level >= 20:
 		return "reporter"
+	case level >= 15:
+		return "planner"
 	case level >= 10:
 		return "guest"
 	default:
