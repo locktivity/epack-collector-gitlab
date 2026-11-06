@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -51,4 +52,45 @@ func TestToVCSPostureKeepsTheTwoFactorRequirement(t *testing.T) {
 	if got := (&GroupPosture{Group: kitGroup}).ToVCSPosture().OrgSecurity.TwoFactorRequired; got != nil {
 		t.Errorf("two_factor_required = %v, want it left out when unknown", *got)
 	}
+}
+
+// A collect list that leaves out access-posture and vuln-scanning leaves out
+// the deprecated blocks that moved to them, each with a not_shared gap.
+func TestCollectLeavesOutTheDeprecatedBlocksMovedToAKindLeftOut(t *testing.T) {
+	full := runInProcess(trustConfig(), kitSecrets(), newReplay(t, kitResponses(kitCleanTenant(), kitBase)))
+	if doc := vcsDoc(t, full); doc["org_security"] == nil || doc["security_features"] == nil {
+		t.Fatalf("vcs-posture = %v, want both deprecated blocks with every kind collected", doc)
+	}
+
+	config := trustConfig()
+	config["collect"] = []any{"vcs-posture", "details"}
+	res := runInProcess(config, kitSecrets(), newReplay(t, kitResponses(kitCleanTenant(), kitBase)))
+	if res.ExitCode != 0 {
+		t.Fatalf("run failed with exit %d: %s", res.ExitCode, res.Stderr)
+	}
+	doc := vcsDoc(t, res)
+	for _, block := range []string{"org_security", "security_features"} {
+		if _, ok := doc[block]; ok {
+			t.Errorf("vcs-posture has %s = %v, which moved to a kind collect leaves out", block, doc[block])
+		}
+		if g := resultGap(res, NormalizedPath, "/"+block); g == nil || g.Code != componentsdk.CodeNotShared {
+			t.Errorf("gap at /%s = %+v, want not_shared", block, g)
+		}
+	}
+}
+
+func vcsDoc(t *testing.T, res componentsdk.InProcessResult) map[string]any {
+	t.Helper()
+	for _, a := range res.Artifacts {
+		if a.Path != NormalizedPath {
+			continue
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(a.Data, &doc); err != nil {
+			t.Fatalf("decode %s: %v", a.Path, err)
+		}
+		return doc
+	}
+	t.Fatalf("the run wrote no %s", NormalizedPath)
+	return nil
 }

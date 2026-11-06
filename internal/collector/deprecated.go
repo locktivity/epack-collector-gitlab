@@ -8,7 +8,8 @@ import "fmt"
 // before v0.10.0 grade the same. A later minor removes them.
 
 // VCSPostureOrgSecurity holds the group's 2FA requirement, left out when the
-// detailed artifact reports it as unknown.
+// detailed artifact reports it as unknown and when the run collects no
+// access-posture artifact.
 type VCSPostureOrgSecurity struct {
 	TwoFactorRequired *bool `json:"two_factor_required,omitempty"`
 }
@@ -43,6 +44,14 @@ func (c *Collector) securityFeatures(vs *VulnScanning) VCSPostureSecurityFeature
 		}
 	}
 	return out
+}
+
+// movedDeprecated records each deprecated block as moved to the artifact
+// that now holds its values. A collect list that leaves out that artifact
+// then leaves out the block, with a not_shared gap.
+func (c *Collector) movedDeprecated() {
+	c.gaps.rec.Moved(normalized("/org_security"), access(""))
+	c.gaps.rec.Moved(normalized("/security_features"), vuln(""))
 }
 
 // coverageCopy is a scanner's coverage as the deprecated block writes it,
