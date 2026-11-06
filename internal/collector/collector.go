@@ -741,6 +741,7 @@ func percent(count, total int) *int {
 // when the run collects them.
 func (c *Collector) Artifacts(posture *GroupPosture) []componentsdk.CollectedArtifact {
 	c.gaps.mirrorNormalized()
+	c.movedDeprecated()
 	vcs := posture.ToVCSPosture()
 	artifacts := []componentsdk.CollectedArtifact{
 		{Data: posture, Path: DetailedPath},

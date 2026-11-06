@@ -7155,24 +7155,24 @@
           },
           {
             "role": "condition",
-            "line": "internal/collector/deprecated.go:31"
+            "line": "internal/collector/deprecated.go:32"
           },
           {
             "role": "condition",
-            "line": "internal/collector/deprecated.go:33"
+            "line": "internal/collector/deprecated.go:34"
           },
           {
             "role": "condition",
-            "line": "internal/collector/deprecated.go:37"
+            "line": "internal/collector/deprecated.go:38"
           },
           {
             "role": "assign",
-            "line": "internal/collector/deprecated.go:39"
+            "line": "internal/collector/deprecated.go:40"
           },
           {
             "role": "helper",
-            "line": "internal/collector/deprecated.go:50",
-            "end": 55
+            "line": "internal/collector/deprecated.go:59",
+            "end": 64
           },
           {
             "role": "input",
@@ -7330,24 +7330,24 @@
           },
           {
             "role": "condition",
-            "line": "internal/collector/deprecated.go:31"
+            "line": "internal/collector/deprecated.go:32"
           },
           {
             "role": "condition",
-            "line": "internal/collector/deprecated.go:33"
+            "line": "internal/collector/deprecated.go:34"
           },
           {
             "role": "condition",
-            "line": "internal/collector/deprecated.go:40"
+            "line": "internal/collector/deprecated.go:41"
           },
           {
             "role": "assign",
-            "line": "internal/collector/deprecated.go:42"
+            "line": "internal/collector/deprecated.go:43"
           },
           {
             "role": "helper",
-            "line": "internal/collector/deprecated.go:50",
-            "end": 55
+            "line": "internal/collector/deprecated.go:59",
+            "end": 64
           },
           {
             "role": "input",
@@ -7505,24 +7505,24 @@
           },
           {
             "role": "condition",
-            "line": "internal/collector/deprecated.go:31"
-          },
-          {
-            "role": "condition",
-            "line": "internal/collector/deprecated.go:33"
+            "line": "internal/collector/deprecated.go:32"
           },
           {
             "role": "condition",
             "line": "internal/collector/deprecated.go:34"
           },
           {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:35"
+          },
+          {
             "role": "assign",
-            "line": "internal/collector/deprecated.go:36"
+            "line": "internal/collector/deprecated.go:37"
           },
           {
             "role": "helper",
-            "line": "internal/collector/deprecated.go:50",
-            "end": 55
+            "line": "internal/collector/deprecated.go:59",
+            "end": 64
           },
           {
             "role": "input",
@@ -9376,20 +9376,20 @@
     "internal/collector/collector.go:734": "\tp := (count * MaxPercentage) / total",
     "internal/collector/collector.go:735": "\treturn \u0026p",
     "internal/collector/collector.go:736": "}",
-    "internal/collector/deprecated.go:31": "\tfor i, s := range vs.Scanners {",
-    "internal/collector/deprecated.go:33": "\t\tswitch s.Scanner {",
-    "internal/collector/deprecated.go:34": "\t\tcase \"dependency_scanning\":",
-    "internal/collector/deprecated.go:36": "\t\t\tout.VulnAlertsPct = coverageCopy(s.CoveragePct)",
-    "internal/collector/deprecated.go:37": "\t\tcase \"sast\":",
-    "internal/collector/deprecated.go:39": "\t\t\tout.CodeScanningPct = coverageCopy(s.CoveragePct)",
-    "internal/collector/deprecated.go:40": "\t\tcase \"secret_detection\":",
-    "internal/collector/deprecated.go:42": "\t\t\tout.SecretScanningPct = coverageCopy(s.CoveragePct) // LINT-ALLOW: coverage percentage, not a secret value",
-    "internal/collector/deprecated.go:50": "func coverageCopy(pct Reading[int]) *float64 {",
-    "internal/collector/deprecated.go:51": "\tif !pct.Read || pct.Value == nil {",
-    "internal/collector/deprecated.go:52": "\t\treturn nil",
-    "internal/collector/deprecated.go:53": "\t}",
-    "internal/collector/deprecated.go:54": "\treturn ptr(float64(*pct.Value))",
-    "internal/collector/deprecated.go:55": "}",
+    "internal/collector/deprecated.go:32": "\tfor i, s := range vs.Scanners {",
+    "internal/collector/deprecated.go:34": "\t\tswitch s.Scanner {",
+    "internal/collector/deprecated.go:35": "\t\tcase \"dependency_scanning\":",
+    "internal/collector/deprecated.go:37": "\t\t\tout.VulnAlertsPct = coverageCopy(s.CoveragePct)",
+    "internal/collector/deprecated.go:38": "\t\tcase \"sast\":",
+    "internal/collector/deprecated.go:40": "\t\t\tout.CodeScanningPct = coverageCopy(s.CoveragePct)",
+    "internal/collector/deprecated.go:41": "\t\tcase \"secret_detection\":",
+    "internal/collector/deprecated.go:43": "\t\t\tout.SecretScanningPct = coverageCopy(s.CoveragePct) // LINT-ALLOW: coverage percentage, not a secret value",
+    "internal/collector/deprecated.go:59": "func coverageCopy(pct Reading[int]) *float64 {",
+    "internal/collector/deprecated.go:60": "\tif !pct.Read || pct.Value == nil {",
+    "internal/collector/deprecated.go:61": "\t\treturn nil",
+    "internal/collector/deprecated.go:62": "\t}",
+    "internal/collector/deprecated.go:63": "\treturn ptr(float64(*pct.Value))",
+    "internal/collector/deprecated.go:64": "}",
     "internal/collector/diagnostics.go:16": "\td.permissionErrors = append(d.permissionErrors,",
     "internal/collector/diagnostics.go:21": "\td.warnings = append(d.warnings,",
     "internal/collector/diagnostics.go:26": "\td.warnings = append(d.warnings,",
