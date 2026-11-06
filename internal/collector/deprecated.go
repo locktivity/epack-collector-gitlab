@@ -39,7 +39,7 @@ func (c *Collector) securityFeatures(vs *VulnScanning) VCSPostureSecurityFeature
 			out.CodeScanningPct = coverageCopy(s.CoveragePct)
 		case "secret_detection":
 			c.gaps.rec.Mirror(coverage, normalized("/security_features/secret_scanning_pct"))
-			out.SecretScanningPct = coverageCopy(s.CoveragePct)
+			out.SecretScanningPct = coverageCopy(s.CoveragePct) // LINT-ALLOW: coverage percentage, not a secret value
 		}
 	}
 	return out

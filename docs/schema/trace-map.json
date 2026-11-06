@@ -9383,7 +9383,7 @@
     "internal/collector/deprecated.go:37": "\t\tcase \"sast\":",
     "internal/collector/deprecated.go:39": "\t\t\tout.CodeScanningPct = coverageCopy(s.CoveragePct)",
     "internal/collector/deprecated.go:40": "\t\tcase \"secret_detection\":",
-    "internal/collector/deprecated.go:42": "\t\t\tout.SecretScanningPct = coverageCopy(s.CoveragePct)",
+    "internal/collector/deprecated.go:42": "\t\t\tout.SecretScanningPct = coverageCopy(s.CoveragePct) // LINT-ALLOW: coverage percentage, not a secret value",
     "internal/collector/deprecated.go:50": "func coverageCopy(pct Reading[int]) *float64 {",
     "internal/collector/deprecated.go:51": "\tif !pct.Read || pct.Value == nil {",
     "internal/collector/deprecated.go:52": "\t\treturn nil",
