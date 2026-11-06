@@ -86,6 +86,8 @@ var normalizedSources = []struct {
 	{"/branch_protection/approving_reviews_repository_count", "/branch_protection_rules/approving_reviews", true},
 	{"/branch_protection/status_checks_pct", "/security_features/pipeline_required", false},
 	{"/branch_protection/status_checks_repository_count", "/security_features/pipeline_required", true},
+	// The deprecated block in deprecated.go.
+	{"/org_security/two_factor_required", "/access_control/two_factor_required", false},
 }
 
 // normalizedNotRead lists the normalized values GitLab reports through a

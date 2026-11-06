@@ -84,8 +84,10 @@ func TestCollectorKit(t *testing.T) {
 					NormalizedPath: {
 						"/repo_coverage_pct":                       80,
 						"/branch_protection/approving_reviews_pct": 50,
-						"/org_security":                            collectortest.Absent,
-						"/security_features":                       collectortest.Absent,
+						"/org_security/two_factor_required":        true,
+						"/security_features/vuln_alerts_pct":       25,
+						"/security_features/code_scanning_pct":     50,
+						"/security_features/secret_scanning_pct":   50,
 					},
 					AccessPath: {
 						"/sign_in/mfa_required":                true,

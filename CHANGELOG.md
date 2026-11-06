@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.2.1
+
+- The collector is built on epack v0.10.1.
+- `artifacts/gitlab.vcs-posture.json` has `org_security` and `security_features` again, as deprecated blocks that epack v0.10.1 declares. A later minor removes them.
+- `org_security.two_factor_required` is the group's 2FA requirement, left out when it is unknown. v0.1 wrote false then.
+- `security_features.vuln_alerts_pct`, `code_scanning_pct`, and `secret_scanning_pct` copy the coverage of the vuln-scanning file's dependency scanning, SAST, and secret detection entries, with their gaps. They are left out when `collect` leaves out `vuln-scanning`. v0.1 wrote 0 for the first two and secret push protection coverage for the third.
+
 ## v0.2.0
 
 - The collector is built on epack v0.10.0. The detailed artifact moves from `artifacts/gitlab.json` to `artifacts/gitlab.details.json`, the path epack's `ArtifactPath` gives it. A reader of the old path needs the new one

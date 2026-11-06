@@ -138,7 +138,7 @@
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           }
         ],
         "gaps": [
@@ -294,7 +294,7 @@
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           }
         ],
         "gaps": [
@@ -435,7 +435,7 @@
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           }
         ]
       },
@@ -1473,7 +1473,7 @@
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           }
         ],
         "gaps": [
@@ -1652,7 +1652,7 @@
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           }
         ],
         "gaps": [
@@ -6305,27 +6305,27 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:74"
+            "line": "internal/collector/normalized.go:78"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:92"
+            "line": "internal/collector/normalized.go:96"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:113"
+            "line": "internal/collector/normalized.go:118"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:114"
+            "line": "internal/collector/normalized.go:119"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:115"
+            "line": "internal/collector/normalized.go:120"
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           }
         ],
         "gaps": [
@@ -6417,19 +6417,7 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:68"
-          },
-          {
-            "role": "input",
-            "line": "internal/collector/normalized.go:69"
-          },
-          {
-            "role": "condition",
-            "line": "internal/collector/normalized.go:70"
-          },
-          {
-            "role": "input",
-            "line": "internal/collector/normalized.go:71"
+            "line": "internal/collector/normalized.go:72"
           },
           {
             "role": "input",
@@ -6437,16 +6425,28 @@
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:97"
+            "line": "internal/collector/normalized.go:74"
           },
           {
-            "role": "assign",
+            "role": "input",
+            "line": "internal/collector/normalized.go:75"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/normalized.go:77"
+          },
+          {
+            "role": "condition",
             "line": "internal/collector/normalized.go:102"
           },
           {
+            "role": "assign",
+            "line": "internal/collector/normalized.go:107"
+          },
+          {
             "role": "helper",
-            "line": "internal/collector/normalized.go:127",
-            "end": 136
+            "line": "internal/collector/normalized.go:132",
+            "end": 141
           }
         ],
         "gaps": [
@@ -6524,27 +6524,27 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:74"
+            "line": "internal/collector/normalized.go:78"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:91"
+            "line": "internal/collector/normalized.go:95"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:113"
+            "line": "internal/collector/normalized.go:118"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:114"
+            "line": "internal/collector/normalized.go:119"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:115"
+            "line": "internal/collector/normalized.go:120"
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           }
         ],
         "gaps": [
@@ -6630,19 +6630,7 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:68"
-          },
-          {
-            "role": "input",
-            "line": "internal/collector/normalized.go:69"
-          },
-          {
-            "role": "condition",
-            "line": "internal/collector/normalized.go:70"
-          },
-          {
-            "role": "input",
-            "line": "internal/collector/normalized.go:71"
+            "line": "internal/collector/normalized.go:72"
           },
           {
             "role": "input",
@@ -6650,16 +6638,28 @@
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:97"
+            "line": "internal/collector/normalized.go:74"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/normalized.go:75"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/normalized.go:77"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/normalized.go:102"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:101"
+            "line": "internal/collector/normalized.go:106"
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:127",
-            "end": 136
+            "line": "internal/collector/normalized.go:132",
+            "end": 141
           }
         ],
         "gaps": [
@@ -6675,12 +6675,12 @@
       },
       "/branch_protection/signed_commits_pct": {
         "gaps": [
-          "internal/collector/gaps.go:120"
+          "internal/collector/gaps.go:122"
         ]
       },
       "/branch_protection/signed_commits_repository_count": {
         "gaps": [
-          "internal/collector/gaps.go:120"
+          "internal/collector/gaps.go:122"
         ]
       },
       "/branch_protection/status_checks_pct": {
@@ -6722,27 +6722,27 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:74"
+            "line": "internal/collector/normalized.go:78"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:93"
+            "line": "internal/collector/normalized.go:97"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:113"
+            "line": "internal/collector/normalized.go:118"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:114"
+            "line": "internal/collector/normalized.go:119"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:115"
+            "line": "internal/collector/normalized.go:120"
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           }
         ],
         "gaps": [
@@ -6802,19 +6802,7 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:68"
-          },
-          {
-            "role": "input",
-            "line": "internal/collector/normalized.go:69"
-          },
-          {
-            "role": "condition",
-            "line": "internal/collector/normalized.go:70"
-          },
-          {
-            "role": "input",
-            "line": "internal/collector/normalized.go:71"
+            "line": "internal/collector/normalized.go:72"
           },
           {
             "role": "input",
@@ -6822,16 +6810,28 @@
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:97"
+            "line": "internal/collector/normalized.go:74"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/normalized.go:75"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/normalized.go:77"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/normalized.go:102"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:103"
+            "line": "internal/collector/normalized.go:108"
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:127",
-            "end": 136
+            "line": "internal/collector/normalized.go:132",
+            "end": 141
           }
         ],
         "gaps": [
@@ -6848,11 +6848,33 @@
         "code": [
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:83"
+            "line": "internal/collector/normalized.go:87"
           },
           {
             "role": "input",
             "line": "internal/collector/posture.go:218"
+          }
+        ]
+      },
+      "/org_security/two_factor_required": {
+        "code": [
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:248"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:252"
+          },
+          {
+            "role": "assign",
+            "line": "internal/collector/normalized.go:100"
+          }
+        ],
+        "copies": [
+          {
+            "path": "artifacts/gitlab.details.json",
+            "pointer": "/access_control/two_factor_required"
           }
         ]
       },
@@ -6900,19 +6922,19 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:77"
+            "line": "internal/collector/normalized.go:81"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:78"
+            "line": "internal/collector/normalized.go:82"
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:79"
+            "line": "internal/collector/normalized.go:83"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:85"
+            "line": "internal/collector/normalized.go:89"
           },
           {
             "role": "input",
@@ -6924,7 +6946,7 @@
         "code": [
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:84"
+            "line": "internal/collector/normalized.go:88"
           }
         ]
       },
@@ -6943,32 +6965,32 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:68"
+            "line": "internal/collector/normalized.go:72"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:89"
+            "line": "internal/collector/normalized.go:93"
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:112",
-            "end": 121
+            "line": "internal/collector/normalized.go:117",
+            "end": 126
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:113"
+            "line": "internal/collector/normalized.go:118"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:114"
+            "line": "internal/collector/normalized.go:119"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:115"
+            "line": "internal/collector/normalized.go:120"
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           }
         ],
         "gaps": [
@@ -6992,23 +7014,23 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:68"
+            "line": "internal/collector/normalized.go:72"
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:69"
+            "line": "internal/collector/normalized.go:73"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:70"
+            "line": "internal/collector/normalized.go:74"
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:71"
+            "line": "internal/collector/normalized.go:75"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:86"
+            "line": "internal/collector/normalized.go:90"
           }
         ],
         "gaps": [
@@ -7032,15 +7054,15 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:68"
+            "line": "internal/collector/normalized.go:72"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:97"
+            "line": "internal/collector/normalized.go:102"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:99"
+            "line": "internal/collector/normalized.go:104"
           }
         ],
         "gaps": [
@@ -7064,15 +7086,15 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:68"
+            "line": "internal/collector/normalized.go:72"
           },
           {
             "role": "condition",
-            "line": "internal/collector/normalized.go:97"
+            "line": "internal/collector/normalized.go:102"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:100"
+            "line": "internal/collector/normalized.go:105"
           }
         ],
         "gaps": [
@@ -7089,7 +7111,532 @@
         "code": [
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:82"
+            "line": "internal/collector/normalized.go:86"
+          }
+        ]
+      },
+      "/security_features/code_scanning_pct": {
+        "operations": [
+          "gitlab.graphql.security_scanners",
+          "gitlab.projects.list"
+        ],
+        "code": [
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:122"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:135"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:138"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:148"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:163"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:164"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:167"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:175"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:31"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:33"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:37"
+          },
+          {
+            "role": "assign",
+            "line": "internal/collector/deprecated.go:39"
+          },
+          {
+            "role": "helper",
+            "line": "internal/collector/deprecated.go:50",
+            "end": 55
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:50"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:51"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:52"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:53"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:151"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:154"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:155"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:156"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:157"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:158"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:159"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:160"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:173"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:181"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:183"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:191"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:198"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:212"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:219"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:108"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:123"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:126"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:129"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:131"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:134"
+          },
+          {
+            "role": "input",
+            "line": "internal/gitlab/graphql.go:135"
+          }
+        ],
+        "gaps": [
+          "internal/collector/vulns.go:192",
+          "internal/collector/vulns.go:213"
+        ],
+        "copies": [
+          {
+            "path": "artifacts/gitlab.vuln-scanning.json",
+            "pointer": "/scanners/*/coverage_pct"
+          }
+        ]
+      },
+      "/security_features/secret_scanning_pct": {
+        "operations": [
+          "gitlab.graphql.security_scanners",
+          "gitlab.projects.list"
+        ],
+        "code": [
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:122"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:135"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:138"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:148"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:163"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:164"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:167"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:175"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:31"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:33"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:40"
+          },
+          {
+            "role": "assign",
+            "line": "internal/collector/deprecated.go:42"
+          },
+          {
+            "role": "helper",
+            "line": "internal/collector/deprecated.go:50",
+            "end": 55
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:50"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:51"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:52"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:53"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:151"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:154"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:155"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:156"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:157"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:158"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:159"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:160"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:173"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:181"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:183"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:191"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:198"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:212"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:219"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:108"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:123"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:126"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:129"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:131"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:134"
+          },
+          {
+            "role": "input",
+            "line": "internal/gitlab/graphql.go:135"
+          }
+        ],
+        "gaps": [
+          "internal/collector/vulns.go:192",
+          "internal/collector/vulns.go:213"
+        ],
+        "copies": [
+          {
+            "path": "artifacts/gitlab.vuln-scanning.json",
+            "pointer": "/scanners/*/coverage_pct"
+          }
+        ]
+      },
+      "/security_features/vuln_alerts_pct": {
+        "operations": [
+          "gitlab.graphql.security_scanners",
+          "gitlab.projects.list"
+        ],
+        "code": [
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:122"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:135"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:138"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:148"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:163"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/collector.go:164"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:167"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/collector.go:175"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:31"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:33"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/deprecated.go:34"
+          },
+          {
+            "role": "assign",
+            "line": "internal/collector/deprecated.go:36"
+          },
+          {
+            "role": "helper",
+            "line": "internal/collector/deprecated.go:50",
+            "end": 55
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:50"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:51"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:52"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:53"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:151"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:154"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:155"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:156"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:157"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:158"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:159"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:160"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:173"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:181"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:183"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:191"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:198"
+          },
+          {
+            "role": "condition",
+            "line": "internal/collector/vulns.go:212"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/vulns.go:219"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:108"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:123"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:126"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:129"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:131"
+          },
+          {
+            "role": "condition",
+            "line": "internal/gitlab/graphql.go:134"
+          },
+          {
+            "role": "input",
+            "line": "internal/gitlab/graphql.go:135"
+          }
+        ],
+        "gaps": [
+          "internal/collector/vulns.go:192",
+          "internal/collector/vulns.go:213"
+        ],
+        "copies": [
+          {
+            "path": "artifacts/gitlab.vuln-scanning.json",
+            "pointer": "/scanners/*/coverage_pct"
           }
         ]
       },
@@ -7157,23 +7704,23 @@
           },
           {
             "role": "input",
-            "line": "internal/collector/normalized.go:60"
-          },
-          {
-            "role": "condition",
-            "line": "internal/collector/normalized.go:63"
-          },
-          {
-            "role": "input",
             "line": "internal/collector/normalized.go:64"
           },
           {
+            "role": "condition",
+            "line": "internal/collector/normalized.go:67"
+          },
+          {
             "role": "input",
-            "line": "internal/collector/normalized.go:65"
+            "line": "internal/collector/normalized.go:68"
+          },
+          {
+            "role": "input",
+            "line": "internal/collector/normalized.go:69"
           },
           {
             "role": "assign",
-            "line": "internal/collector/normalized.go:95"
+            "line": "internal/collector/normalized.go:99"
           }
         ]
       }
@@ -7400,7 +7947,7 @@
         "code": [
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           },
           {
             "role": "input",
@@ -7569,7 +8116,7 @@
         "code": [
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           },
           {
             "role": "condition",
@@ -7714,7 +8261,7 @@
         "code": [
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           },
           {
             "role": "condition",
@@ -8102,7 +8649,7 @@
         "code": [
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           },
           {
             "role": "condition",
@@ -8358,7 +8905,7 @@
           },
           {
             "role": "helper",
-            "line": "internal/collector/normalized.go:138"
+            "line": "internal/collector/normalized.go:143"
           },
           {
             "role": "input",
@@ -8829,6 +9376,20 @@
     "internal/collector/collector.go:734": "\tp := (count * MaxPercentage) / total",
     "internal/collector/collector.go:735": "\treturn \u0026p",
     "internal/collector/collector.go:736": "}",
+    "internal/collector/deprecated.go:31": "\tfor i, s := range vs.Scanners {",
+    "internal/collector/deprecated.go:33": "\t\tswitch s.Scanner {",
+    "internal/collector/deprecated.go:34": "\t\tcase \"dependency_scanning\":",
+    "internal/collector/deprecated.go:36": "\t\t\tout.VulnAlertsPct = coverageCopy(s.CoveragePct)",
+    "internal/collector/deprecated.go:37": "\t\tcase \"sast\":",
+    "internal/collector/deprecated.go:39": "\t\t\tout.CodeScanningPct = coverageCopy(s.CoveragePct)",
+    "internal/collector/deprecated.go:40": "\t\tcase \"secret_detection\":",
+    "internal/collector/deprecated.go:42": "\t\t\tout.SecretScanningPct = coverageCopy(s.CoveragePct)",
+    "internal/collector/deprecated.go:50": "func coverageCopy(pct Reading[int]) *float64 {",
+    "internal/collector/deprecated.go:51": "\tif !pct.Read || pct.Value == nil {",
+    "internal/collector/deprecated.go:52": "\t\treturn nil",
+    "internal/collector/deprecated.go:53": "\t}",
+    "internal/collector/deprecated.go:54": "\treturn ptr(float64(*pct.Value))",
+    "internal/collector/deprecated.go:55": "}",
     "internal/collector/diagnostics.go:16": "\td.permissionErrors = append(d.permissionErrors,",
     "internal/collector/diagnostics.go:21": "\td.warnings = append(d.warnings,",
     "internal/collector/diagnostics.go:26": "\td.warnings = append(d.warnings,",
@@ -8836,7 +9397,7 @@
     "internal/collector/diagnostics.go:35": "\tif len(d.permissionErrors) == 0 \u0026\u0026 len(d.warnings) == 0 {",
     "internal/collector/diagnostics.go:39": "\t\tPermissionErrors: d.permissionErrors,",
     "internal/collector/diagnostics.go:40": "\t\tWarnings:         d.warnings,",
-    "internal/collector/gaps.go:120": "\t\tl.rec.NotCollectedCode(normalized(u.pointer), componentsdk.CodeNotRead, u.reason)",
+    "internal/collector/gaps.go:122": "\t\tl.rec.NotCollectedCode(normalized(u.pointer), componentsdk.CodeNotRead, u.reason)",
     "internal/collector/handler.go:31": "\tcfg := ctx.Config()",
     "internal/collector/handler.go:33": "\tincludePatterns, err := getStringSlice(cfg, \"include_patterns\")",
     "internal/collector/handler.go:34": "\tif err != nil {",
@@ -8845,56 +9406,57 @@
     "internal/collector/handler.go:43": "\t\tGroup:           getString(cfg, \"group\"),",
     "internal/collector/handler.go:45": "\t\tIncludePatterns: includePatterns,",
     "internal/collector/handler.go:46": "\t\tExcludePatterns: excludePatterns,",
-    "internal/collector/normalized.go:60": "\tunavailable := []string{",
-    "internal/collector/normalized.go:63": "\tif g.Diagnostics != nil {",
-    "internal/collector/normalized.go:64": "\t\tunavailable = append(unavailable, g.Diagnostics.PermissionErrors...)",
-    "internal/collector/normalized.go:65": "\t\tunavailable = append(unavailable, g.Diagnostics.Warnings...)",
-    "internal/collector/normalized.go:68": "\tlisted, included := g.Scope.ProjectCount, g.Scope.IncludedProjectCount",
-    "internal/collector/normalized.go:69": "\tvar present *bool",
-    "internal/collector/normalized.go:70": "\tif included != nil {",
-    "internal/collector/normalized.go:71": "\t\tpresent = ptr(*included \u003e 0)",
-    "internal/collector/normalized.go:73": "\tnone := present != nil \u0026\u0026 !*present",
-    "internal/collector/normalized.go:74": "\tpct := func(p *int) Reading[float64] { return percentage(p, none) }",
-    "internal/collector/normalized.go:77": "\torganization := g.fullPath",
-    "internal/collector/normalized.go:78": "\tif organization == \"\" {",
-    "internal/collector/normalized.go:79": "\t\torganization = g.Group",
-    "internal/collector/normalized.go:82": "\t\tSchemaVersion:       \"1.0.0\",",
-    "internal/collector/normalized.go:83": "\t\tCollectedAt:         g.CollectedAt,",
-    "internal/collector/normalized.go:84": "\t\tProvider:            \"gitlab\",",
-    "internal/collector/normalized.go:85": "\t\tOrganization:        organization,",
-    "internal/collector/normalized.go:86": "\t\tRepositoriesPresent: present,",
-    "internal/collector/normalized.go:89": "\t\tRepoCoveragePct: percentage(g.Scope.ProjectsCoverage, listed != nil \u0026\u0026 *listed == 0),",
-    "internal/collector/normalized.go:91": "\t\t\tPRRequiredPct:       pct(bp.MergeRequestRequired),",
-    "internal/collector/normalized.go:92": "\t\t\tApprovingReviewsPct: pct(bp.ApprovingReviews),",
-    "internal/collector/normalized.go:93": "\t\t\tStatusChecksPct:     pct(sf.PipelineRequired),",
-    "internal/collector/normalized.go:95": "\t\tUnavailableSources: unavailable,",
-    "internal/collector/normalized.go:97": "\tif componentsdk.Level(g.CollectedAtLevel).AtLeast(componentsdk.LevelAudit) {",
-    "internal/collector/normalized.go:99": "\t\tposture.RepositoryCount = listed",
-    "internal/collector/normalized.go:100": "\t\tposture.ScannedRepositoryCount = included",
-    "internal/collector/normalized.go:101": "\t\tposture.BranchProtection.PRRequiredRepositoryCount = ruleCount(bp.MergeRequestRequired, n.mergeRequestRequired, none)",
-    "internal/collector/normalized.go:102": "\t\tposture.BranchProtection.ApprovingReviewsRepositoryCount = ruleCount(bp.ApprovingReviews, n.approvingReviews, none)",
-    "internal/collector/normalized.go:103": "\t\tposture.BranchProtection.StatusChecksRepositoryCount = ruleCount(sf.PipelineRequired, n.pipelineRequired, none)",
-    "internal/collector/normalized.go:112": "func percentage(pct *int, none bool) Reading[float64] {",
-    "internal/collector/normalized.go:113": "\tswitch {",
-    "internal/collector/normalized.go:114": "\tcase pct != nil:",
-    "internal/collector/normalized.go:115": "\t\treturn Reading[float64]{Value: ptr(float64(*pct)), Read: true}",
-    "internal/collector/normalized.go:116": "\tcase none:",
-    "internal/collector/normalized.go:117": "\t\treturn Reading[float64]{Read: true}",
-    "internal/collector/normalized.go:118": "\tdefault:",
-    "internal/collector/normalized.go:119": "\t\treturn Reading[float64]{}",
-    "internal/collector/normalized.go:120": "\t}",
-    "internal/collector/normalized.go:121": "}",
-    "internal/collector/normalized.go:127": "func ruleCount(pct *int, n int, none bool) *int {",
-    "internal/collector/normalized.go:128": "\tswitch {",
-    "internal/collector/normalized.go:129": "\tcase pct != nil:",
-    "internal/collector/normalized.go:130": "\t\treturn \u0026n",
-    "internal/collector/normalized.go:131": "\tcase none:",
-    "internal/collector/normalized.go:132": "\t\treturn ptr(0)",
-    "internal/collector/normalized.go:133": "\tdefault:",
-    "internal/collector/normalized.go:134": "\t\treturn nil",
-    "internal/collector/normalized.go:135": "\t}",
-    "internal/collector/normalized.go:136": "}",
-    "internal/collector/normalized.go:138": "func ptr[T any](v T) *T { return \u0026v }",
+    "internal/collector/normalized.go:64": "\tunavailable := []string{",
+    "internal/collector/normalized.go:67": "\tif g.Diagnostics != nil {",
+    "internal/collector/normalized.go:68": "\t\tunavailable = append(unavailable, g.Diagnostics.PermissionErrors...)",
+    "internal/collector/normalized.go:69": "\t\tunavailable = append(unavailable, g.Diagnostics.Warnings...)",
+    "internal/collector/normalized.go:72": "\tlisted, included := g.Scope.ProjectCount, g.Scope.IncludedProjectCount",
+    "internal/collector/normalized.go:73": "\tvar present *bool",
+    "internal/collector/normalized.go:74": "\tif included != nil {",
+    "internal/collector/normalized.go:75": "\t\tpresent = ptr(*included \u003e 0)",
+    "internal/collector/normalized.go:77": "\tnone := present != nil \u0026\u0026 !*present",
+    "internal/collector/normalized.go:78": "\tpct := func(p *int) Reading[float64] { return percentage(p, none) }",
+    "internal/collector/normalized.go:81": "\torganization := g.fullPath",
+    "internal/collector/normalized.go:82": "\tif organization == \"\" {",
+    "internal/collector/normalized.go:83": "\t\torganization = g.Group",
+    "internal/collector/normalized.go:86": "\t\tSchemaVersion:       \"1.0.0\",",
+    "internal/collector/normalized.go:87": "\t\tCollectedAt:         g.CollectedAt,",
+    "internal/collector/normalized.go:88": "\t\tProvider:            \"gitlab\",",
+    "internal/collector/normalized.go:89": "\t\tOrganization:        organization,",
+    "internal/collector/normalized.go:90": "\t\tRepositoriesPresent: present,",
+    "internal/collector/normalized.go:93": "\t\tRepoCoveragePct: percentage(g.Scope.ProjectsCoverage, listed != nil \u0026\u0026 *listed == 0),",
+    "internal/collector/normalized.go:95": "\t\t\tPRRequiredPct:       pct(bp.MergeRequestRequired),",
+    "internal/collector/normalized.go:96": "\t\t\tApprovingReviewsPct: pct(bp.ApprovingReviews),",
+    "internal/collector/normalized.go:97": "\t\t\tStatusChecksPct:     pct(sf.PipelineRequired),",
+    "internal/collector/normalized.go:99": "\t\tUnavailableSources: unavailable,",
+    "internal/collector/normalized.go:100": "\t\tOrgSecurity:        VCSPostureOrgSecurity{TwoFactorRequired: g.AccessControl.TwoFactorRequired},",
+    "internal/collector/normalized.go:102": "\tif componentsdk.Level(g.CollectedAtLevel).AtLeast(componentsdk.LevelAudit) {",
+    "internal/collector/normalized.go:104": "\t\tposture.RepositoryCount = listed",
+    "internal/collector/normalized.go:105": "\t\tposture.ScannedRepositoryCount = included",
+    "internal/collector/normalized.go:106": "\t\tposture.BranchProtection.PRRequiredRepositoryCount = ruleCount(bp.MergeRequestRequired, n.mergeRequestRequired, none)",
+    "internal/collector/normalized.go:107": "\t\tposture.BranchProtection.ApprovingReviewsRepositoryCount = ruleCount(bp.ApprovingReviews, n.approvingReviews, none)",
+    "internal/collector/normalized.go:108": "\t\tposture.BranchProtection.StatusChecksRepositoryCount = ruleCount(sf.PipelineRequired, n.pipelineRequired, none)",
+    "internal/collector/normalized.go:117": "func percentage(pct *int, none bool) Reading[float64] {",
+    "internal/collector/normalized.go:118": "\tswitch {",
+    "internal/collector/normalized.go:119": "\tcase pct != nil:",
+    "internal/collector/normalized.go:120": "\t\treturn Reading[float64]{Value: ptr(float64(*pct)), Read: true}",
+    "internal/collector/normalized.go:121": "\tcase none:",
+    "internal/collector/normalized.go:122": "\t\treturn Reading[float64]{Read: true}",
+    "internal/collector/normalized.go:123": "\tdefault:",
+    "internal/collector/normalized.go:124": "\t\treturn Reading[float64]{}",
+    "internal/collector/normalized.go:125": "\t}",
+    "internal/collector/normalized.go:126": "}",
+    "internal/collector/normalized.go:132": "func ruleCount(pct *int, n int, none bool) *int {",
+    "internal/collector/normalized.go:133": "\tswitch {",
+    "internal/collector/normalized.go:134": "\tcase pct != nil:",
+    "internal/collector/normalized.go:135": "\t\treturn \u0026n",
+    "internal/collector/normalized.go:136": "\tcase none:",
+    "internal/collector/normalized.go:137": "\t\treturn ptr(0)",
+    "internal/collector/normalized.go:138": "\tdefault:",
+    "internal/collector/normalized.go:139": "\t\treturn nil",
+    "internal/collector/normalized.go:140": "\t}",
+    "internal/collector/normalized.go:141": "}",
+    "internal/collector/normalized.go:143": "func ptr[T any](v T) *T { return \u0026v }",
     "internal/collector/posture.go:217": "\t\tSchemaVersion: SchemaVersion,",
     "internal/collector/posture.go:218": "\t\tCollectedAt:   now.UTC().Format(time.RFC3339),",
     "internal/collector/posture.go:219": "\t\tGroup:         group,",
@@ -9133,6 +9695,7 @@
     "internal/collector/vulns.go:170": "\t\tSchemaVersion: \"1.0.0\",",
     "internal/collector/vulns.go:171": "\t\tCollectedAt:   posture.CollectedAt,",
     "internal/collector/vulns.go:172": "\t\tProvider:      \"gitlab\",",
+    "internal/collector/vulns.go:173": "\t\tScanners:      make([]VulnScanner, len(scannerKinds)),",
     "internal/collector/vulns.go:181": "\tfor i, kind := range scannerKinds {",
     "internal/collector/vulns.go:183": "\t\tout.Scanner, out.Category = kind.name, kind.category",
     "internal/collector/vulns.go:191": "\t\tif r.projectsErr != nil {",
