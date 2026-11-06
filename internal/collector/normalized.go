@@ -14,7 +14,9 @@ import (
 // false when the filters select no project. The project counts are written
 // from the audit level, as the schema specifies. Values this collector does
 // not read are absent, with a not_read gap, and named in
-// unavailable_sources.
+// unavailable_sources. OrgSecurity and SecurityFeatures are deprecated
+// blocks, written at every level as before epack v0.10.0 (see
+// deprecated.go).
 type VCSPosture struct {
 	SchemaVersion          string                     `json:"schema_version"`
 	CollectedAt            string                     `json:"collected_at"`
@@ -26,6 +28,8 @@ type VCSPosture struct {
 	RepoCoveragePct        Reading[float64]           `json:"repo_coverage_pct,omitzero"`
 	BranchProtection       VCSPostureBranchProtection `json:"branch_protection,omitzero"`
 	UnavailableSources     []string                   `json:"unavailable_sources,omitempty"`
+	OrgSecurity            VCSPostureOrgSecurity      `json:"org_security,omitzero"`
+	SecurityFeatures       VCSPostureSecurityFeatures `json:"security_features,omitzero"`
 }
 
 // Reading is a normalized value that may have no reading in the detailed
@@ -93,6 +97,7 @@ func (g *GroupPosture) ToVCSPosture() *VCSPosture {
 			StatusChecksPct:     pct(sf.PipelineRequired),
 		},
 		UnavailableSources: unavailable,
+		OrgSecurity:        VCSPostureOrgSecurity{TwoFactorRequired: g.AccessControl.TwoFactorRequired},
 	}
 	if componentsdk.Level(g.CollectedAtLevel).AtLeast(componentsdk.LevelAudit) {
 		n := g.counts

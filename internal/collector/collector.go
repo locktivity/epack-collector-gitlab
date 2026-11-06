@@ -741,15 +741,18 @@ func percent(count, total int) *int {
 // when the run collects them.
 func (c *Collector) Artifacts(posture *GroupPosture) []componentsdk.CollectedArtifact {
 	c.gaps.mirrorNormalized()
+	vcs := posture.ToVCSPosture()
 	artifacts := []componentsdk.CollectedArtifact{
 		{Data: posture, Path: DetailedPath},
-		{Data: posture.ToVCSPosture(), Schema: NormalizedSchema, Path: NormalizedPath},
+		{Data: vcs, Schema: NormalizedSchema, Path: NormalizedPath},
 	}
 	if c.config.AccessPosture {
 		artifacts = append(artifacts, componentsdk.CollectedArtifact{Data: c.accessPosture(posture), Schema: AccessSchema, Path: AccessPath})
 	}
 	if c.config.VulnScanning {
-		artifacts = append(artifacts, componentsdk.CollectedArtifact{Data: c.vulnScanning(posture), Schema: VulnSchema, Path: VulnPath})
+		vs := c.vulnScanning(posture)
+		vcs.SecurityFeatures = c.securityFeatures(vs)
+		artifacts = append(artifacts, componentsdk.CollectedArtifact{Data: vs, Schema: VulnSchema, Path: VulnPath})
 	}
 	return artifacts
 }
