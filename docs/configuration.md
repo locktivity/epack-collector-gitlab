@@ -39,7 +39,7 @@ collectors:
 
 Filters match `name`, not `path_with_namespace`. For example, `backend-*` matches a project named `backend-api`, regardless of its namespace. Projects in subgroups are included; projects shared into the group are excluded. Archived projects are included unless filtered out. Percentages use all included projects as their denominator.
 
-Project filters apply to project metrics, project inventory, project webhooks, deploy keys, project access tokens, scanner coverage, and vulnerabilities. Group members, group access tokens, group webhooks, runners, and group audit events keep their group scope. The configured group and filter patterns appear in trust output too.
+Project filters apply to project metrics, project inventory, project webhooks, deploy keys, project access tokens, scanner coverage, and vulnerabilities. Group members, group access tokens, group webhooks, runners, and group audit events keep their group scope. The configured group and filter patterns appear in trust output too. Below the audit level, a group configured by its numeric ID appears by its full path.
 
 Supply pattern lists as arrays of strings with valid glob syntax. Invalid globs and non-string list entries are rejected before collection begins.
 

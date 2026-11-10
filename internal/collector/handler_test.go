@@ -3,8 +3,11 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +142,120 @@ func TestFreeEditionLeavesPremiumValuesOutAsNotLicensed(t *testing.T) {
 		if gap := resultGap(res, at.path, at.pointer); gap == nil || gap.Code != componentsdk.CodeNotLicensed || gap.Owner != componentsdk.OwnerNobody {
 			t.Errorf("gap at %s %s = %+v, want not_licensed", at.path, at.pointer, gap)
 		}
+	}
+}
+
+// A trust run names no project by ID or name in any artifact, even one whose
+// branch protection and approvals could not be read. An audit run names it
+// in its diagnostics.
+func TestATrustRunWritesNoProjectIDs(t *testing.T) {
+	const id = 4815162342
+	tenant := kitCleanTenant()
+	tenant.projectPages[1] = append(tenant.projectPages[1], kitProject(id, "billing-service", "private", "main", true, true))
+	failing := fmt.Sprintf("%s/projects/%d", kitBase, id)
+	serverError := func(url string) collectortest.Response {
+		return collectortest.Response{URL: url, Status: http.StatusInternalServerError, Body: `{"message":"500 Internal Server Error"}`}
+	}
+	responses := append([]collectortest.Response{
+		serverError(failing + "/protected_branches"),
+		serverError(failing + "/approvals"),
+		serverError(failing + "/approval_rules"),
+	}, kitResponses(tenant, kitBase)...)
+
+	config := kitConfig()
+	config["level"] = "trust"
+	trust := runInProcess(config, kitSecrets(), newReplay(t, responses))
+	if trust.ExitCode != 0 {
+		t.Fatalf("the trust run failed with exit %d: %s", trust.ExitCode, trust.Stderr)
+	}
+	for _, a := range trust.Artifacts {
+		for _, name := range []string{strconv.Itoa(id), "billing-service"} {
+			if strings.Contains(string(a.Data), name) {
+				t.Errorf("the trust run wrote %s in %s", name, a.Path)
+			}
+		}
+	}
+
+	config["level"] = "audit"
+	audit := runInProcess(config, kitSecrets(), newReplay(t, responses))
+	for _, a := range audit.Artifacts {
+		if a.Path != DetailedPath {
+			continue
+		}
+		var out GroupPosture
+		if err := json.Unmarshal(a.Data, &out); err != nil {
+			t.Fatal(err)
+		}
+		want := "surface protected_branches skipped: project billing-service: fetch failed"
+		if out.Diagnostics == nil || !slices.Contains(out.Diagnostics.Warnings, want) {
+			t.Errorf("the audit run's diagnostics %+v do not include %q", out.Diagnostics, want)
+		}
+		return
+	}
+	t.Fatalf("the audit run wrote no %s", DetailedPath)
+}
+
+// A trust run of a group configured by its numeric ID names it by its full
+// path and writes the ID in no artifact. An audit run writes the configured
+// ID in the detailed artifact, as before.
+func TestATrustRunWritesNoNumericGroupID(t *testing.T) {
+	const id = "90817263"
+	tenant := kitCleanTenant()
+	tenant.group.ID = 90817263
+	responses := kitResponses(tenant, kitBase)
+	for i := range responses {
+		responses[i].URL = strings.Replace(responses[i].URL, "/groups/"+kitGroup+"/", "/groups/"+id+"/", 1)
+		responses[i].URL = strings.Replace(responses[i].URL, "/groups/"+kitGroup+"?", "/groups/"+id+"?", 1)
+		if responses[i].URL == kitBase+"/groups/"+kitGroup {
+			responses[i].URL = kitBase + "/groups/" + id
+		}
+	}
+	config := kitConfig()
+	config["group"] = id
+
+	type named struct {
+		group, organization string
+	}
+	run := func(level string) (componentsdk.InProcessResult, named) {
+		t.Helper()
+		config["level"] = level
+		replay := newReplay(t, responses)
+		res := runInProcess(config, kitSecrets(), replay)
+		if res.ExitCode != 0 {
+			t.Fatalf("the %s run failed with exit %d: %s", level, res.ExitCode, res.Stderr)
+		}
+		for _, request := range replay.Unmatched() {
+			t.Errorf("the %s run had no canned response for %s", level, request)
+		}
+		var got named
+		for _, a := range res.Artifacts {
+			var doc struct {
+				Group        string `json:"group"`
+				Organization string `json:"organization"`
+			}
+			if a.Path != DetailedPath && a.Path != NormalizedPath {
+				continue
+			}
+			if err := json.Unmarshal(a.Data, &doc); err != nil {
+				t.Fatal(err)
+			}
+			got.group += doc.Group
+			got.organization += doc.Organization
+		}
+		return res, got
+	}
+
+	trust, got := run("trust")
+	if want := (named{group: kitGroup, organization: kitGroup}); got != want {
+		t.Errorf("the trust run named the group %+v, want %+v", got, want)
+	}
+	for _, a := range trust.Artifacts {
+		if strings.Contains(string(a.Data), id) {
+			t.Errorf("the trust run wrote the group ID in %s", a.Path)
+		}
+	}
+	if _, got := run("audit"); got != (named{group: id, organization: kitGroup}) {
+		t.Errorf("the audit run named the group %+v, want the configured ID and the full path", got)
 	}
 }
 

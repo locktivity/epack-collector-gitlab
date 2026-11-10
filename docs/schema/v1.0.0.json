@@ -40,7 +40,7 @@
     },
     "group": {
       "type": "string",
-      "description": "The configured group path or numeric group ID.",
+      "description": "The configured group path or numeric group ID. Below the audit level, a group configured by its numeric ID is named by its full path, and is left out with a gap when GitLab sends none.",
       "x-epack-label": "Group",
       "x-epack-summary": "The GitLab group this collection covers."
     },

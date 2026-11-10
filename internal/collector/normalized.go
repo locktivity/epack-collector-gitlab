@@ -21,7 +21,7 @@ type VCSPosture struct {
 	SchemaVersion          string                     `json:"schema_version"`
 	CollectedAt            string                     `json:"collected_at"`
 	Provider               string                     `json:"provider"`
-	Organization           string                     `json:"organization"`
+	Organization           string                     `json:"organization,omitempty"`
 	RepositoriesPresent    *bool                      `json:"repositories_present,omitempty"`
 	RepositoryCount        *int                       `json:"repository_count,omitempty"`
 	ScannedRepositoryCount *int                       `json:"scanned_repository_count,omitempty"`
