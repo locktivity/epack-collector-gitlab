@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -153,6 +154,9 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 
 	posture := NewGroupPosture(c.config.Group, c.now())
 	posture.fullPath = groupPath(group, c.config.Group)
+	if !level.AtLeast(componentsdk.LevelAudit) && numericGroup(c.config.Group) {
+		c.nameGroupByPath(posture, group)
+	}
 	posture.CollectedAtLevel = string(level)
 	posture.Scope.IncludePatterns = includePatterns
 	posture.Scope.ExcludePatterns = excludePatterns
@@ -592,13 +596,13 @@ func ruleAppliesToBranch(rule gitlab.ApprovalRule, branch string, branchIsProtec
 	return false
 }
 
-// projectDiagLabel returns a privacy-safe label for a project in diagnostics.
-// At trust level, only the project ID is included; at audit+ the name is used.
+// projectDiagLabel names a project that could not be read in diagnostics:
+// by its name from the audit level, and by no name or ID below it.
 func projectDiagLabel(proj gitlab.Project, level componentsdk.Level) string {
 	if level.AtLeast(componentsdk.LevelAudit) {
 		return fmt.Sprintf("project %s: fetch failed", proj.Name)
 	}
-	return fmt.Sprintf("project %d: fetch failed", proj.ID)
+	return "a project: fetch failed"
 }
 
 // analyzeProtection merges all protection rules that match the default branch.
@@ -758,6 +762,25 @@ func (c *Collector) Artifacts(posture *GroupPosture) []componentsdk.CollectedArt
 	return artifacts
 }
 
+// numericGroup reports whether the configured group is a numeric group ID.
+// GitLab reads a group reference made only of digits as an ID.
+func numericGroup(configured string) bool {
+	_, err := strconv.ParseUint(configured, 10, 64)
+	return err == nil
+}
+
+// nameGroupByPath names the group in both artifacts by its full path, for a
+// run below the audit level whose configuration names the group by its
+// numeric ID, which sits at the audit level. When GitLab sent no full path,
+// the group is left out of both with a gap.
+func (c *Collector) nameGroupByPath(posture *GroupPosture, group *gitlab.Group) {
+	posture.Group, posture.fullPath = group.FullPath, group.FullPath
+	if group.FullPath == "" {
+		c.gaps.leaveOut(errNoFullPath, "/group")
+		c.gaps.rec.NotCollected(normalized("/organization"), errNoFullPath)
+	}
+}
+
 // groupPath is the group's full path, which the GraphQL group query takes.
 // configured is the group as the config names it, which can be a numeric
 // ID.
@@ -776,6 +799,10 @@ var (
 	errMaskedHost = componentsdk.CodeError(componentsdk.CodeUnsupported, errors.New("the webhook URL's host is masked"))
 	errNoHost     = componentsdk.CodeError(componentsdk.CodeInvalidResponse, errors.New("a webhook URL in the response has no readable host"))
 )
+
+// errNoFullPath leaves out a group configured by its numeric ID when the
+// group response has no full path to name it by below the audit level.
+var errNoFullPath = componentsdk.CodeError(componentsdk.CodeInvalidResponse, errors.New("the group response has no full_path, and below the audit level the group is named by its path, not its numeric ID"))
 
 // webhookHost returns the host of a webhook's URL, with its port. The URL is
 // read twice, with each placeholder set to 1 and then to 2. A host that

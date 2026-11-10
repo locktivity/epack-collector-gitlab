@@ -43,6 +43,9 @@ var kitIgnore = map[string][]string{
 	NormalizedPath: {"/unavailable_sources"},
 }
 
+// kitResultPath is where the kit's runs write their collector result.
+const kitResultPath = "artifacts/gitlab.collector-result.json"
+
 func kitConfig() map[string]any {
 	return map[string]any{
 		"group":            kitGroup,
@@ -328,12 +331,19 @@ func TestCollectorKit(t *testing.T) {
 			{
 				Name:      "inventories over their caps",
 				Responses: kitOverTheCapsResponses(),
+				// The project list stops at the cap, below the projects the
+				// run assessed, so the project targets are not complete.
 				Expect: map[string]map[string]any{
 					DetailedPath: {
 						"/projects/total_count": MaxProjects + 1,
 						"/projects/truncated":   true,
 						"/members/total_count":  MaxMembers + 1,
 						"/members/truncated":    true,
+					},
+					kitResultPath: {
+						"/targets/1/kind":     "project",
+						"/targets/1/count":    MaxProjects,
+						"/targets/1/complete": false,
 					},
 				},
 			},

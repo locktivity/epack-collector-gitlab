@@ -75,6 +75,7 @@ func Run(ctx componentsdk.CollectorContext) error {
 	if err != nil {
 		return err
 	}
+	posture.declareTargets(componentsdk.Records(ctx))
 	return ctx.Emit(c.Artifacts(posture))
 }
 

@@ -11,7 +11,7 @@ type GroupPosture struct {
 	SchemaVersion    string `json:"schema_version"`
 	CollectedAt      string `json:"collected_at"`
 	CollectedAtLevel string `json:"collected_at_level"`
-	Group            string `json:"group"`
+	Group            string `json:"group,omitempty"`
 
 	Scope                 Scope                 `json:"scope"`
 	Posture               Posture               `json:"posture"`
@@ -34,7 +34,8 @@ type GroupPosture struct {
 	counts ruleCounts
 	// fullPath is the group's full_path from GitLab, which names the
 	// organization in the normalized artifact. Group is the configured
-	// value, which can be a numeric ID.
+	// value, which can be a numeric ID from the audit level. Below it, a
+	// numeric ID gives way to the full path.
 	fullPath string
 }
 

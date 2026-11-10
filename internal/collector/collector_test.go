@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -549,37 +550,84 @@ func TestRuleAppliesToBranch(t *testing.T) {
 	}
 }
 
-func TestDiagnostics_TrustLevel_NoProjectNames(t *testing.T) {
-	client := &fakeClient{
-		group: &gitlab.Group{ID: 1, Name: "test-group"},
-		projects: []gitlab.Project{
-			{ID: 10, Name: "secret-project", DefaultBranch: "main", Visibility: "private"},
-		},
-		protectedBranches: map[int][]gitlab.ProtectedBranch{
-			10: nil,
-		},
-	}
-
-	client.protectedBranches = map[int][]gitlab.ProtectedBranch{}
-	delete(client.protectedBranches, 10)
-
-	fakeBranchErr := &fakeClientWithBranchErr{
-		fakeClient: client,
-		branchErr:  &gitlab.APIError{StatusCode: 500, Message: "500 Internal Server Error"},
-	}
-
-	c := New(Config{Group: "test-group"}, fakeBranchErr)
-	posture, err := c.Collect(context.Background(), componentsdk.LevelTrust)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if posture.Diagnostics == nil {
-		t.Fatal("expected diagnostics with warnings")
-	}
-	for _, w := range posture.Diagnostics.Warnings {
-		if strings.Contains(w, "secret-project") {
-			t.Errorf("trust-level diagnostic leaked project name: %s", w)
+func TestDiagnostics_TrustLevel_NoProjectNamesOrIDs(t *testing.T) {
+	const projectID = 4815162342
+	for level, want := range map[componentsdk.Level]string{
+		componentsdk.LevelTrust: "surface protected_branches skipped: a project: fetch failed",
+		componentsdk.LevelAudit: "surface protected_branches skipped: project secret-project: fetch failed",
+	} {
+		client := &fakeClientWithBranchErr{
+			fakeClient: &fakeClient{
+				group:             &gitlab.Group{ID: 1, Name: "test-group"},
+				projects:          []gitlab.Project{{ID: projectID, Name: "secret-project", DefaultBranch: "main", Visibility: "private"}},
+				protectedBranches: map[int][]gitlab.ProtectedBranch{},
+			},
+			branchErr: &gitlab.APIError{StatusCode: 500, Message: "500 Internal Server Error"},
 		}
+		c := New(Config{Group: "test-group"}, client)
+		posture, err := c.Collect(context.Background(), level)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", level, err)
+		}
+		if posture.Diagnostics == nil || !slices.Contains(posture.Diagnostics.Warnings, want) {
+			t.Fatalf("%s: diagnostics = %+v, want the warning %q", level, posture.Diagnostics, want)
+		}
+		if level != componentsdk.LevelTrust {
+			continue
+		}
+		for _, w := range append(posture.Diagnostics.Warnings, posture.ToVCSPosture().UnavailableSources...) {
+			if strings.Contains(w, "secret-project") || strings.Contains(w, strconv.Itoa(projectID)) {
+				t.Errorf("trust-level diagnostic names the project: %s", w)
+			}
+		}
+	}
+}
+
+// Below the audit level, a group configured by its numeric ID is named by
+// its full path in both artifacts, and left out of both with a gap when
+// GitLab sends no full path. From the audit level, the configured ID stays.
+func TestNumericGroupIsNamedByItsPathBelowAudit(t *testing.T) {
+	const id = "90817263"
+	cases := []struct {
+		name         string
+		level        componentsdk.Level
+		fullPath     string
+		group, org   string
+		leftOut      bool
+		configuredAs string
+	}{
+		{name: "trust", level: componentsdk.LevelTrust, fullPath: "acme/platform", group: "acme/platform", org: "acme/platform", configuredAs: id},
+		{name: "trust without a full path", level: componentsdk.LevelTrust, group: "", org: "", leftOut: true, configuredAs: id},
+		{name: "trust with a path", level: componentsdk.LevelTrust, fullPath: "acme/platform", group: "acme/platform", org: "acme/platform", configuredAs: "acme/platform"},
+		{name: "audit", level: componentsdk.LevelAudit, fullPath: "acme/platform", group: id, org: "acme/platform", configuredAs: id},
+		{name: "audit without a full path", level: componentsdk.LevelAudit, group: id, org: id, configuredAs: id},
+		{name: "internal", level: componentsdk.LevelInternal, fullPath: "acme/platform", group: id, org: "acme/platform", configuredAs: id},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &componentsdk.Recorder{}
+			client := &fakeClient{group: &gitlab.Group{ID: 90817263, Name: "Platform", FullPath: tc.fullPath}}
+			c := New(Config{Group: tc.configuredAs, Recorder: rec}, client)
+			posture, err := c.Collect(context.Background(), tc.level)
+			if err != nil {
+				t.Fatal(err)
+			}
+			vcs := posture.ToVCSPosture()
+			if posture.Group != tc.group || vcs.Organization != tc.org {
+				t.Errorf("group = %q and organization = %q, want %q and %q", posture.Group, vcs.Organization, tc.group, tc.org)
+			}
+			raw, err := json.Marshal([]any{posture, vcs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.level.AtLeast(componentsdk.LevelAudit) && strings.Contains(string(raw), id) {
+				t.Errorf("a %s run wrote the group ID: %s", tc.level, raw)
+			}
+			gap := gapAt(rec, "/group")
+			if tc.leftOut != (gap != nil) || (gap != nil && gap.Code != componentsdk.CodeInvalidResponse) {
+				t.Errorf("gap at /group = %+v, want one with invalid_response: %v", gap, tc.leftOut)
+			}
+		})
 	}
 }
 
@@ -801,7 +849,7 @@ func TestToVCSPosture(t *testing.T) {
 // group's full path from GitLab, and the detailed group stays as configured.
 func TestToVCSPosture_OrganizationIsTheGroupPath(t *testing.T) {
 	client := &fakeClient{group: &gitlab.Group{ID: 7, Name: "Acme", FullPath: "acme"}}
-	posture, err := New(Config{Group: "7"}, client).Collect(t.Context(), componentsdk.LevelTrust)
+	posture, err := New(Config{Group: "7"}, client).Collect(t.Context(), componentsdk.LevelAudit)
 	if err != nil {
 		t.Fatal(err)
 	}

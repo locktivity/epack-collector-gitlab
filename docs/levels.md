@@ -13,7 +13,7 @@ Group-wide settings and aggregate percentages:
 - In the access-posture artifact, whether the group has members, Owners, and credentials, with the MFA, SSO, inactive member, and credential percentages
 - In the vuln-scanning artifact, each scanner's coverage and whether it has open critical, open high, or overdue findings
 
-No collected project or member inventory is emitted. The configured group, include/exclude patterns, and diagnostics are included. Trust-level project diagnostics use numeric project IDs. Progress messages can contain project names.
+No collected project or member inventory is emitted. The configured group, include/exclude patterns, and diagnostics are included. A group configured by its numeric ID is named by its full path instead, in the detailed artifact's `group` and the vcs-posture artifact's `organization`. From audit, `group` holds the configured ID. A trust-level diagnostic about one project names it by neither name nor ID. From audit, it names the project. Progress messages can contain project names.
 
 Use `read_api` scope. Secret push protection status requires Ultimate and a role that can see the field. The access-posture values need the Owner role, and the vulnerability values need Ultimate. See [configuration](configuration.md) for permission and version requirements.
 

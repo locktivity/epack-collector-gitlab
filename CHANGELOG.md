@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v0.2.3
+
+- The collector is built on epack v0.10.5.
+- At trust, a diagnostic about one project, such as a failed protected branches read, says `a project: fetch failed`. It named the project's numeric ID before, and `unavailable_sources` in `artifacts/gitlab.vcs-posture.json` copied it. Audit and internal diagnostics still name the project.
+- At trust, a group configured by its numeric ID is named by its full path in `group` in `artifacts/gitlab.details.json` and in `organization` in `artifacts/gitlab.vcs-posture.json`. A trust run wrote the configured ID in `group` before. When GitLab's group response has no full path, both are left out with an `invalid_response` gap. Audit and internal runs write the configured value as before.
+- The collector result has `targets` now. They name the group, at `group` in `artifacts/gitlab.details.json`, and the projects the run assessed, at `projects.per_project` in the same file, with how each was chosen.
+
+## v0.2.2
+
 - The collector is built on epack v0.10.2.
 - The deprecated `org_security` block is left out when `collect` leaves out `access-posture`, with a `not_shared` gap. v0.2.1 wrote it whatever `collect` listed.
 - The deprecated `security_features` block has a `not_shared` gap when `collect` leaves out `vuln-scanning`. v0.2.1 left it out with no gap.
