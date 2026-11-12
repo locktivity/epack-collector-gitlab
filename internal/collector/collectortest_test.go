@@ -114,7 +114,11 @@ func TestCollectorKit(t *testing.T) {
 						"/credentials/unrestricted_pct":        20,
 						"/credentials/write_access_pct":        60,
 						"/credentials/rotation_overdue_pct":    60,
-						"/root":                                collectortest.Absent,
+						"/root/root_accounts_present":          false,
+						"/root/root_account_count":             0,
+						"/root/root_mfa_account_count":         0,
+						"/root/root_mfa_coverage_pct":          nil,
+						"/root/root_access_keys_present":       false,
 						"/connected_apps":                      collectortest.Absent,
 					},
 					VulnPath: {
@@ -174,6 +178,7 @@ func TestCollectorKit(t *testing.T) {
 						"/credentials/credentials_present":     false,
 						"/credentials/credential_count":        0,
 						"/credentials/never_expiring_pct":      nil,
+						"/root/root_accounts_present":          false,
 					},
 					VulnPath: {
 						"/scanners/0/resources_present":     false,

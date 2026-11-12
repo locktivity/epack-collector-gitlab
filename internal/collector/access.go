@@ -14,8 +14,7 @@ import (
 
 // AccessPosture is the normalized evidencepack/access-posture@v1 artifact
 // for the group. A section whose every value was left out is absent. The
-// group has no root account, so that section is absent with an unsupported
-// gap. The connected apps section is absent with a not_read gap.
+// connected apps section is absent with a not_read gap.
 type AccessPosture struct {
 	SchemaVersion string            `json:"schema_version"`
 	CollectedAt   string            `json:"collected_at"`
@@ -24,6 +23,7 @@ type AccessPosture struct {
 	SignIn        AccessSignIn      `json:"sign_in,omitzero"`
 	Members       AccessMembers     `json:"members,omitzero"`
 	Admins        AccessAdmins      `json:"admins,omitzero"`
+	Root          AccessRoot        `json:"root,omitzero"`
 	Credentials   AccessCredentials `json:"credentials,omitzero"`
 }
 
@@ -58,6 +58,17 @@ type AccessAdmins struct {
 	LocalAdminCount          *int         `json:"local_admin_count,omitempty"`
 	LocalMFAAdminCount       *int         `json:"local_mfa_admin_count,omitempty"`
 	LocalAdminMFACoveragePct Reading[int] `json:"local_admin_mfa_coverage_pct,omitzero"`
+}
+
+// AccessRoot is the group's built-in root accounts. A GitLab group has
+// none, so the present flags are false and the MFA coverage is null. The
+// counts are 0 from the audit level.
+type AccessRoot struct {
+	RootAccountsPresent   *bool        `json:"root_accounts_present,omitempty"`
+	RootAccountCount      *int         `json:"root_account_count,omitempty"`
+	RootMFAAccountCount   *int         `json:"root_mfa_account_count,omitempty"`
+	RootMFACoveragePct    Reading[int] `json:"root_mfa_coverage_pct,omitzero"`
+	RootAccessKeysPresent *bool        `json:"root_access_keys_present,omitempty"`
 }
 
 // AccessCredentials counts the group's access tokens, its assessed
@@ -101,10 +112,9 @@ var writeScopes = []string{
 
 // The details of the unsupported gaps.
 const (
-	noSSOSetting  = "GitLab has no API field for whether a group requires SAML SSO."
-	noSSOSetup    = "GitLab has no API field for whether SAML SSO is set up for a group."
-	noSCIMSetup   = "GitLab has no API field for whether SCIM is set up for a group."
-	noRootAccount = "A GitLab group has no built-in root account."
+	noSSOSetting = "GitLab has no API field for whether a group requires SAML SSO."
+	noSSOSetup   = "GitLab has no API field for whether SAML SSO is set up for a group."
+	noSCIMSetup  = "GitLab has no API field for whether SCIM is set up for a group."
 )
 
 // The details of the not_read gaps, each naming the call that has the value.
@@ -368,8 +378,14 @@ func (c *Collector) accessPosture(posture *GroupPosture) *AccessPosture {
 	ap.SignIn.MFARequired = posture.AccessControl.TwoFactorRequired
 	c.gaps.rec.Mirror(detailed("/access_control/two_factor_required"), access("/sign_in/mfa_required"))
 	a.unsupported("/sign_in/sso_required", noSSOSetting)
-	a.unsupported("/root", noRootAccount)
 	a.notRead("/connected_apps", appsNotRead)
+	ap.Root = AccessRoot{
+		RootAccountsPresent:   ptr(false),
+		RootAccountCount:      a.count(0),
+		RootMFAAccountCount:   a.count(0),
+		RootMFACoveragePct:    share(0, 0, componentsdk.RoundDown),
+		RootAccessKeysPresent: ptr(false),
+	}
 
 	c.fillMembers(ap, a)
 	c.fillCredentials(ap, a)
