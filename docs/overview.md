@@ -43,6 +43,8 @@ The access-posture output has the group's 2FA requirement, its members and Owner
 
 A member is inactive when their `last_activity_on` in the group's billable members list is empty or before the date 90 days before the run. A sign-in sets `last_activity_on`, and so does Git or API use. GitLab has this list only for a top-level group, and only an Owner can read it. The list has no Guests on GitLab Ultimate, so a group on Ultimate with a Guest has its inactive values left out.
 
+A GitLab group has no built-in root account. So `root.root_accounts_present` and `root.root_access_keys_present` are false and `root.root_mfa_coverage_pct` is null. From the audit level the root counts are 0.
+
 Credentials are the active access tokens of the group and of the assessed projects. They also include the deploy keys enabled in those projects. A deploy key enabled in several projects counts once, and an expired deploy key is not counted. GitLab access tokens always expire, so the never-expiring credentials are deploy keys without an expiry date. An access token with the `api` scope counts as unrestricted. When the group restricts access by IP address, the restriction applies to every token and deploy key, so none counts as unrestricted.
 
 The vuln-scanning output has one entry each for dependency scanning, SAST, and secret detection. A project counts as scanned when the scanner's job succeeded in its latest pipeline on the default branch. A scanner is enabled when it scanned at least one assessed project. Open findings are the detected and confirmed vulnerabilities in the group's vulnerability report, for the assessed projects. A finding is overdue when it is critical and open more than 30 days, or high and open more than 90 days.
@@ -51,7 +53,6 @@ These values have no source in GitLab's API, so each is left out with an `unsupp
 
 - `sign_in.sso_required`, since the API does not say whether a group enforces SAML SSO
 - `sign_in.sso_configured` and `sign_in.scim_enabled` when no member has a SAML or SCIM identity
-- `root`, since a group has no built-in root account
 
 These values come from GitLab API calls the collector does not make, so each is left out with a `not_read` gap that names the call:
 

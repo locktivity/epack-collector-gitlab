@@ -66,6 +66,9 @@ func TestAccessPosture_AppAccessChecksAtTrust(t *testing.T) {
 		{[]string{"credentials", "never_expiring_pct"}, 40.0},
 		{[]string{"members", "members_present"}, true},
 		{[]string{"members", "inactive_pct"}, 50.0},
+		{[]string{"root", "root_accounts_present"}, false},
+		{[]string{"root", "root_access_keys_present"}, false},
+		{[]string{"root", "root_mfa_coverage_pct"}, nil},
 	}
 	for _, w := range want {
 		if got, ok := valueAt(data, w.keys...); !ok || got != w.want {
@@ -75,6 +78,7 @@ func TestAccessPosture_AppAccessChecksAtTrust(t *testing.T) {
 	for _, keys := range [][]string{
 		{"members", "member_count"}, {"admins", "local_admin_count"}, {"credentials", "credential_count"},
 		{"members", "inactive_member_count"}, {"sign_in", "sso_required"},
+		{"root", "root_account_count"}, {"root", "root_mfa_account_count"},
 	} {
 		if got, ok := valueAt(data, keys...); ok {
 			t.Errorf("%v = %v at trust, want it left out", keys, got)
@@ -82,7 +86,6 @@ func TestAccessPosture_AppAccessChecksAtTrust(t *testing.T) {
 	}
 	gaps := map[string]componentsdk.Code{
 		"/sign_in/sso_required":             componentsdk.CodeUnsupported,
-		"/root":                             componentsdk.CodeUnsupported,
 		"/connected_apps":                   componentsdk.CodeNotRead,
 		"/members/external_members_present": componentsdk.CodeNotRead,
 	}
@@ -93,6 +96,9 @@ func TestAccessPosture_AppAccessChecksAtTrust(t *testing.T) {
 	}
 	if g := resultGap(res, AccessPath, "/members/external_member_count"); g != nil {
 		t.Errorf("a trust run left the gap %+v on a count it never writes", g)
+	}
+	if g := resultGap(res, AccessPath, "/root"); g != nil {
+		t.Errorf("gap at /root = %+v, want none", g)
 	}
 }
 
