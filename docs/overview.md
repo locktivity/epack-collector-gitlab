@@ -17,6 +17,13 @@ The collector reads the GitLab REST API v4 and GraphQL API for a configured grou
 
 It does not inspect repository contents, CI configuration, or CODEOWNERS files. See [collection levels](levels.md) for the emitted fields and limits.
 
+## Not collected
+
+GitLab offers the following through its API, and the collector does not read them.
+
+- **Container scanning and DAST findings.** GitLab's vulnerability report lists them alongside the dependency scanning, SAST and secret detection findings the collector reads. The `vuln-scanning` output has no entry for either scanner.
+- **Personal access tokens and SSH keys.** GitLab lists the personal access tokens of a group's service accounts. On GitLab.com, the Owner of a top-level group can also list the personal access tokens and SSH keys of the group's enterprise users. The credentials the collector counts are group and project access tokens and deploy keys.
+
 ## Hosting modes
 
 - **GitLab.com:** default instance URL
