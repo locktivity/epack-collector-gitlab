@@ -38,6 +38,9 @@ type kitTenant struct {
 	deployKeys    map[int][]gitlab.DeployKey
 	runners       []gitlab.Runner
 	auditEvents   []gitlab.AuditEvent
+	// memberRoles are the group's custom roles, listed when a member holds
+	// one.
+	memberRoles []gitlab.MemberRole
 
 	groupTokens   []gitlab.AccessToken
 	projectTokens map[int][]gitlab.AccessToken
@@ -151,7 +154,7 @@ func kitCleanTenant() kitTenant {
 		memberPages: [][]gitlab.Member{
 			{
 				{ID: 1, Username: "alice", Name: "Alice", State: "active", AccessLevel: 50, TwoFactorEnabled: boolPtr(true), GroupSAMLIdentity: saml, GroupSCIMIdentity: &gitlab.Identity{Provider: "group_scim"}},
-				{ID: 2, Username: "bob", Name: "Bob", State: "active", AccessLevel: 40, TwoFactorEnabled: boolPtr(false)},
+				{ID: 2, Username: "bob", Name: "Bob", State: "active", AccessLevel: 40, TwoFactorEnabled: boolPtr(false), MemberRole: &gitlab.MemberRole{ID: 3}},
 			},
 			{
 				{ID: 3, Username: "carol", Name: "Carol", State: "active", AccessLevel: 30, TwoFactorEnabled: boolPtr(true)},
@@ -160,6 +163,9 @@ func kitCleanTenant() kitTenant {
 				{ID: 6, Username: "group_7_bot_5c1e9a", Name: "release token", State: "active", AccessLevel: 40, TwoFactorEnabled: boolPtr(false)},
 			},
 		},
+		// bob's custom role can neither manage the group's members nor
+		// delete the group, so he is not an admin.
+		memberRoles: []gitlab.MemberRole{{ID: 3}},
 		billablePages: [][]gitlab.BillableMember{
 			{
 				{ID: 1, LastActivityOn: kitDate(2026, 10, 16)},
@@ -170,7 +176,9 @@ func kitCleanTenant() kitTenant {
 				{ID: 3},
 				// The date 90 days before the run.
 				{ID: 5, LastActivityOn: kitDate(2026, 7, 19)},
-				{ID: 20, LastActivityOn: kitDate(2025, 1, 1)},
+				// frank holds a role only on a project, so the group's
+				// member list does not have him.
+				{ID: 20, Username: "frank", State: "active", LastActivityOn: kitDate(2025, 1, 1)},
 			},
 		},
 		groupHooks: []gitlab.Webhook{
@@ -311,6 +319,14 @@ func kitIPRestrictedTenant() kitTenant {
 
 // kitUltimateGuestTenant is the clean group on GitLab Ultimate with a Guest
 // member, whom the billable members list leaves out.
+// kitMemberManagerTenant is kitCleanTenant with bob's custom role able to
+// add, remove, and assign the group's members.
+func kitMemberManagerTenant() kitTenant {
+	t := kitCleanTenant()
+	t.memberRoles = []gitlab.MemberRole{{ID: 3, AdminGroupMember: true}}
+	return t
+}
+
 func kitUltimateGuestTenant() kitTenant {
 	t := kitCleanTenant()
 	last := len(t.memberPages) - 1
@@ -348,6 +364,9 @@ func kitResponses(t kitTenant, base string) []collectortest.Response {
 	}
 
 	responses = append(responses, kitPages(groupURL+"/members/all", t.memberPages)...)
+	if t.memberRoles != nil {
+		responses = append(responses, kitList(groupURL+"/member_roles", t.memberRoles))
+	}
 	if t.group.ParentID == nil {
 		responses = append(responses, kitPages(groupURL+"/billable_members", t.billablePages)...)
 	}

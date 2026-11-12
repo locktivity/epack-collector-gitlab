@@ -117,14 +117,29 @@ type Member struct {
 	CreatedAt         *time.Time `json:"created_at"`
 	GroupSAMLIdentity *Identity  `json:"group_saml_identity"`
 	GroupSCIMIdentity *Identity  `json:"group_scim_identity"`
+	// MemberRole is the member's custom role, nil for a default role.
+	MemberRole *MemberRole `json:"member_role"`
 }
 
-// BillableMember is one user in a top-level group's billable members list.
-// LastActivityOn is the date of the user's last activity anywhere in
-// GitLab, or nil when GitLab has none recorded.
+// MemberRole is a custom role. AdminGroupMember lets whoever holds it add,
+// remove, and assign the group's members, and RemoveGroup lets them delete
+// the group.
+type MemberRole struct {
+	ID               int  `json:"id"`
+	AdminGroupMember bool `json:"admin_group_member"`
+	RemoveGroup      bool `json:"remove_group"`
+}
+
+// BillableMember is one user in a top-level group's billable members list,
+// which holds the users with a role in the group, its subgroups, or its
+// projects, except Guests on Ultimate. LastActivityOn is the date of the
+// user's last activity anywhere in GitLab, or nil when GitLab has none
+// recorded.
 type BillableMember struct {
-	ID             int   `json:"id"`
-	LastActivityOn *Date `json:"last_activity_on"`
+	ID             int    `json:"id"`
+	Username       string `json:"username"`
+	State          string `json:"state"`
+	LastActivityOn *Date  `json:"last_activity_on"`
 }
 
 // Identity is a member's link to the group's SAML or SCIM provider.

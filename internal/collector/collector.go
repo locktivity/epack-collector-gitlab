@@ -24,6 +24,7 @@ type GitLabClient interface {
 	ListApprovalRules(ctx context.Context, projectID int) ([]gitlab.ApprovalRule, error)
 	ListGroupMembers(ctx context.Context, groupID string) ([]gitlab.Member, error)
 	ListBillableMembers(ctx context.Context, groupID string) ([]gitlab.BillableMember, error)
+	ListMemberRoles(ctx context.Context, groupID string) ([]gitlab.MemberRole, error)
 	ListGroupWebhooks(ctx context.Context, groupID string) ([]gitlab.Webhook, error)
 	ListProjectWebhooks(ctx context.Context, projectID int) ([]gitlab.Webhook, error)
 	ListProjectDeployKeys(ctx context.Context, projectID int) ([]gitlab.DeployKey, error)
@@ -58,6 +59,8 @@ type reads struct {
 	membersErr  error
 	billable    []gitlab.BillableMember
 	billableErr error
+	roles       []gitlab.MemberRole
+	rolesErr    error
 	deployKeys  projectLists[gitlab.DeployKey]
 
 	groupTokens    []gitlab.AccessToken
@@ -195,6 +198,7 @@ func (c *Collector) Collect(ctx context.Context, level componentsdk.Level) (*Gro
 	}
 	if c.config.AccessPosture {
 		c.readBillableMembers(ctx)
+		c.readMemberRoles(ctx)
 		c.readAccessTokens(ctx, included, projectsErr)
 	}
 	if c.config.VulnScanning && projectsErr == nil {

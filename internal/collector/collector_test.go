@@ -27,6 +27,8 @@ type fakeClient struct {
 	membersErr        error
 	billable          []gitlab.BillableMember
 	billableErr       error
+	memberRoles       []gitlab.MemberRole
+	memberRolesErr    error
 	groupWebhooks     []gitlab.Webhook
 	groupWebhooksErr  error
 	projectWebhooks   map[int][]gitlab.Webhook
@@ -80,6 +82,10 @@ func (f *fakeClient) ListGroupMembers(_ context.Context, _ string) ([]gitlab.Mem
 
 func (f *fakeClient) ListBillableMembers(_ context.Context, _ string) ([]gitlab.BillableMember, error) {
 	return f.billable, f.billableErr
+}
+
+func (f *fakeClient) ListMemberRoles(_ context.Context, _ string) ([]gitlab.MemberRole, error) {
+	return f.memberRoles, f.memberRolesErr
 }
 
 func (f *fakeClient) ListGroupWebhooks(_ context.Context, _ string) ([]gitlab.Webhook, error) {

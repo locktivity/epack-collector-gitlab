@@ -356,7 +356,7 @@ func TestNamesPermission(t *testing.T) {
 // Every operation the client names declares the scope or role it needs.
 func TestEveryOperationDeclaresItsPermission(t *testing.T) {
 	for _, op := range []string{
-		opGroup, opProjects, opProtectedBranches, opApprovalSettings, opApprovalRules, opGroupMembers, opBillableMembers,
+		opGroup, opProjects, opProtectedBranches, opApprovalSettings, opApprovalRules, opGroupMembers, opBillableMembers, opMemberRoles,
 		opGroupHooks, opProjectHooks, opDeployKeys, opGroupRunners, opGroupAuditEvents, opGroupAccessTokens,
 		opProjectAccessTokens, opSecurityScanners, opVulnerabilities,
 	} {

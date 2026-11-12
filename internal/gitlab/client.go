@@ -45,6 +45,7 @@ const (
 	opApprovalRules       = "gitlab.approval_rules.list"
 	opGroupMembers        = "gitlab.group_members.list"
 	opBillableMembers     = "gitlab.billable_members.list"
+	opMemberRoles         = "gitlab.member_roles.list"
 	opGroupHooks          = "gitlab.group_hooks.list"
 	opProjectHooks        = "gitlab.project_hooks.list"
 	opDeployKeys          = "gitlab.deploy_keys.list"
@@ -69,6 +70,7 @@ var permissions = map[string]string{
 	opApprovalRules:       scopeReadAPI,
 	opGroupMembers:        scopeReadAPI,
 	opBillableMembers:     "Owner",
+	opMemberRoles:         "Owner",
 	opGroupHooks:          "Owner",
 	opProjectHooks:        "Maintainer",
 	opDeployKeys:          "Maintainer",
@@ -238,6 +240,13 @@ func (c *Client) ListGroupMembers(ctx context.Context, groupID string) ([]Member
 // list them. GitLab answers 400 for a subgroup or for another role.
 func (c *Client) ListBillableMembers(ctx context.Context, groupID string) ([]BillableMember, error) {
 	return listAll[BillableMember](ctx, c, opBillableMembers, "/groups/"+url.PathEscape(groupID)+"/billable_members", url.Values{})
+}
+
+// ListMemberRoles lists a top-level group's custom roles. Only the group's
+// Owners can list them, on GitLab.com with Ultimate. A GitLab Self-Managed
+// instance lists its custom roles only to an administrator, instance-wide.
+func (c *Client) ListMemberRoles(ctx context.Context, groupID string) ([]MemberRole, error) {
+	return listAll[MemberRole](ctx, c, opMemberRoles, "/groups/"+url.PathEscape(groupID)+"/member_roles", url.Values{})
 }
 
 // ListGroupWebhooks lists webhooks for a group (Premium+).

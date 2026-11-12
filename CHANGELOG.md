@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+## v0.2.5
+
+- In the access file, the members of a top-level group include the active users in its billable members list, who hold a role only in a subgroup or a project. The group's member list has no SAML identity or two-factor authentication for them, so with such a member the MFA values, and the SSO values in a group with SAML identities, are left out with a `partial` gap. When the billable members list can't be read, the member counts and the percentages over every member are left out with its gap.
+- A member whose custom role can manage the group's members (`admin_group_member`) or delete the group (`remove_group`) counts as an admin beside the Owners. The collector reads the group's custom roles from `/groups/:id/member_roles` when a member has one, which needs the Owner role and GitLab Ultimate on GitLab.com. When they can't be read, the admin counts are left out with a `partial` gap.
+
 ## v0.2.4
 
 - The collector is built on Go 1.26.11.
