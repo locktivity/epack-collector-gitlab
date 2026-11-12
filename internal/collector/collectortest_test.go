@@ -16,6 +16,7 @@ var kitOperations = []string{
 	"gitlab.approval_rules.list",
 	"gitlab.group_members.list",
 	"gitlab.billable_members.list",
+	"gitlab.member_roles.list",
 	"gitlab.group_hooks.list",
 	"gitlab.project_hooks.list",
 	"gitlab.deploy_keys.list",
@@ -92,20 +93,22 @@ func TestCollectorKit(t *testing.T) {
 						"/security_features/code_scanning_pct":     50,
 						"/security_features/secret_scanning_pct":   50,
 					},
+					// frank holds a role only on a project, so the group's member
+					// list has no SAML identity or two-factor authentication for him.
 					AccessPath: {
 						"/sign_in/mfa_required":                true,
 						"/sign_in/sso_configured":              true,
 						"/sign_in/scim_enabled":                true,
 						"/sign_in/sso_required":                collectortest.Absent,
-						"/members/member_count":                4,
-						"/members/sso_coverage_pct":            25,
-						"/members/local_member_count":          4,
-						"/members/local_mfa_coverage_pct":      50,
-						"/members/inactive_member_count":       2,
-						"/members/inactive_pct":                50,
+						"/members/member_count":                5,
+						"/members/sso_coverage_pct":            collectortest.Absent,
+						"/members/local_member_count":          5,
+						"/members/local_mfa_coverage_pct":      collectortest.Absent,
+						"/members/inactive_member_count":       3,
+						"/members/inactive_pct":                60,
 						"/members/external_members_present":    collectortest.Absent,
 						"/admins/admin_count":                  2,
-						"/admins/admin_share_pct":              50,
+						"/admins/admin_share_pct":              40,
 						"/admins/local_admins_present":         true,
 						"/admins/local_admin_mfa_coverage_pct": 50,
 						"/credentials/credential_count":        5,
@@ -205,6 +208,9 @@ func TestCollectorKit(t *testing.T) {
 				},
 			},
 			{
+				// GitLab lists the billable members only to Owners, so
+				// whether anyone holds a role only in a subgroup or a
+				// project is unknown, and the member count is left out.
 				Name:      "token with the Maintainer role",
 				Responses: kitMaintainerResponses(),
 				Expect: map[string]map[string]any{
@@ -212,7 +218,7 @@ func TestCollectorKit(t *testing.T) {
 						"/sign_in/mfa_required":                true,
 						"/sign_in/sso_configured":              collectortest.Absent,
 						"/members/members_present":             true,
-						"/members/member_count":                4,
+						"/members/member_count":                collectortest.Absent,
 						"/members/local_members_present":       true,
 						"/members/local_mfa_coverage_pct":      collectortest.Absent,
 						"/members/inactive_pct":                collectortest.Absent,
@@ -251,7 +257,7 @@ func TestCollectorKit(t *testing.T) {
 					},
 					AccessPath: {
 						"/sign_in/mfa_required":            true,
-						"/members/member_count":            4,
+						"/members/member_count":            5,
 						"/credentials/credentials_present": true,
 						"/credentials/credential_count":    collectortest.Absent,
 					},
@@ -322,14 +328,25 @@ func TestCollectorKit(t *testing.T) {
 				},
 			},
 			{
+				// bob's custom role can manage the group's members, so he
+				// counts as an admin beside the two Owners.
+				Name:      "custom role that manages members",
+				Responses: kitResponses(kitMemberManagerTenant(), kitBase),
+				Expect: map[string]map[string]any{AccessPath: {
+					"/admins/admin_count":       3,
+					"/admins/admin_share_pct":   60,
+					"/admins/local_admin_count": 3,
+				}},
+			},
+			{
 				Name:      "Guest on GitLab Ultimate",
 				Responses: kitResponses(kitUltimateGuestTenant(), kitBase),
 				Expect: map[string]map[string]any{
 					AccessPath: {
-						"/members/member_count":           5,
+						"/members/member_count":           6,
 						"/members/inactive_member_count":  collectortest.Absent,
 						"/members/inactive_pct":           collectortest.Absent,
-						"/members/local_mfa_coverage_pct": 60,
+						"/members/local_mfa_coverage_pct": collectortest.Absent,
 					},
 				},
 			},

@@ -2,6 +2,7 @@ package collector
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -65,7 +66,7 @@ func TestAccessPosture_AppAccessChecksAtTrust(t *testing.T) {
 		{[]string{"credentials", "credentials_present"}, true},
 		{[]string{"credentials", "never_expiring_pct"}, 40.0},
 		{[]string{"members", "members_present"}, true},
-		{[]string{"members", "inactive_pct"}, 50.0},
+		{[]string{"members", "inactive_pct"}, 60.0},
 		{[]string{"root", "root_accounts_present"}, false},
 		{[]string{"root", "root_access_keys_present"}, false},
 		{[]string{"root", "root_mfa_coverage_pct"}, nil},
@@ -126,7 +127,7 @@ func TestCountMembers(t *testing.T) {
 		{Username: "project_12_bot1", State: "active", AccessLevel: 40, TwoFactorEnabled: boolPtr(false)},
 		{Username: "service_account_group_7_9f", State: "active", AccessLevel: 30, TwoFactorEnabled: boolPtr(false)},
 	}
-	s := countMembers(members)
+	s := countMembers(members, customRoles{})
 	want := memberStats{
 		members: 4, sso: 1, mfa: 2,
 		admins: 3, adminsMFA: 1,
@@ -137,11 +138,62 @@ func TestCountMembers(t *testing.T) {
 	}
 }
 
+// A member is an admin as an Owner, or with a custom role that can manage
+// the group's members or delete the group. A custom role the group's list
+// does not have, or a list that could not be read, leaves it unknown.
+func TestCustomRolesAdmin(t *testing.T) {
+	refused := errors.New("refused")
+	roles := newCustomRoles([]gitlab.MemberRole{
+		{ID: 1, AdminGroupMember: true},
+		{ID: 2, RemoveGroup: true},
+		{ID: 3},
+	}, nil)
+	cases := []struct {
+		name   string
+		roles  customRoles
+		member gitlab.Member
+		admin  bool
+		err    error
+	}{
+		{"Owner", roles, gitlab.Member{AccessLevel: 50}, true, nil},
+		{"Maintainer", roles, gitlab.Member{AccessLevel: 40}, false, nil},
+		{"manages members", roles, gitlab.Member{AccessLevel: 30, MemberRole: &gitlab.MemberRole{ID: 1}}, true, nil},
+		{"deletes the group", roles, gitlab.Member{AccessLevel: 10, MemberRole: &gitlab.MemberRole{ID: 2}}, true, nil},
+		{"neither", roles, gitlab.Member{AccessLevel: 40, MemberRole: &gitlab.MemberRole{ID: 3}}, false, nil},
+		{"not listed", roles, gitlab.Member{AccessLevel: 30, MemberRole: &gitlab.MemberRole{ID: 9}}, false, errRoleNotListed},
+		{"list unread", newCustomRoles(nil, refused), gitlab.Member{AccessLevel: 30, MemberRole: &gitlab.MemberRole{ID: 1}}, false, refused},
+		{"Owner with the list unread", newCustomRoles(nil, refused), gitlab.Member{AccessLevel: 50, MemberRole: &gitlab.MemberRole{ID: 1}}, true, nil},
+	}
+	for _, tc := range cases {
+		admin, err := tc.roles.admin(tc.member)
+		if admin != tc.admin || !errors.Is(err, tc.err) || (tc.err == nil && err != nil) {
+			t.Errorf("%s: admin = %v, %v; want %v, %v", tc.name, admin, err, tc.admin, tc.err)
+		}
+	}
+}
+
+// The billable members list adds the active users the group's member list
+// does not have, who hold a role only in a subgroup or a project. Bot users
+// are left out, as they are from the members.
+func TestBillableOnly(t *testing.T) {
+	members := []gitlab.Member{{ID: 1, Username: "alice", State: "active"}}
+	billable := []gitlab.BillableMember{
+		{ID: 1, Username: "alice", State: "active"},
+		{ID: 2, Username: "frank", State: "active"},
+		{ID: 3, Username: "grace", State: "blocked"},
+		{ID: 4, Username: "project_12_bot_9a1b", State: "active"},
+	}
+	got := billableOnly(members, billable)
+	if len(got) != 1 || got[0].Username != "frank" {
+		t.Errorf("billableOnly = %+v, want frank alone", got)
+	}
+}
+
 func TestCountMembers_HiddenTwoFactor(t *testing.T) {
 	s := countMembers([]gitlab.Member{
 		{Username: "owner", State: "active", AccessLevel: 50},
 		{Username: "dev", State: "active", AccessLevel: 30},
-	})
+	}, customRoles{})
 	if s.ownerFields || s.mfaUnknown != 2 || s.adminsMFAUnknown != 1 {
 		t.Errorf("countMembers = %+v, want two members with unknown MFA and no Owner-only fields", s)
 	}
@@ -154,7 +206,7 @@ func TestCountMembers_IdentitiesWithoutTwoFactor(t *testing.T) {
 		"saml": {Username: "dev", State: "active", AccessLevel: 30, GroupSAMLIdentity: &gitlab.Identity{Provider: "group_saml"}},
 		"scim": {Username: "dev", State: "active", AccessLevel: 30, GroupSCIMIdentity: &gitlab.Identity{Provider: "group_scim"}},
 	} {
-		s := countMembers([]gitlab.Member{m})
+		s := countMembers([]gitlab.Member{m}, customRoles{})
 		if !s.ownerFields || s.twoFactorField || s.mfaUnknown != 1 {
 			t.Errorf("%s: countMembers = %+v, want Owner-only fields, no two_factor_enabled, and 1 unknown MFA", name, s)
 		}

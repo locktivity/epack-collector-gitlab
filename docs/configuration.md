@@ -72,7 +72,8 @@ For GitLab Dedicated, use the URL of your dedicated instance in the same way.
 | Secret push protection status | trust+ | Ultimate; status is exposed to Developer, Security Manager, Maintainer, or Owner where supported |
 | Members | trust+ | `read_api`; inherited and invited membership follows the API's visibility rules. The detailed member inventory is audit+ |
 | Member 2FA status and SAML and SCIM identities | trust+ | Owner. 2FA status needs GitLab 19.4 or later. The identities appear only in groups with SAML SSO. Without them the access-posture MFA and SSO values are left out as `permission_denied`. On GitLab before 19.4, an Owner token whose group has SAML or SCIM identities gets the SSO values, and the MFA values are left out as `unsupported`. In the detailed inventory, missing 2FA values remain `null` |
-| Billable members, for each member's last activity | trust+ | Owner, and a top-level group. Other roles get HTTP 400, which leaves the inactive values out as `permission_denied`. A subgroup has no list of its own, so its inactive values are left out as `not_read` |
+| Billable members, for each member's last activity and the people with a role only in a subgroup or a project | trust+ | Owner, and a top-level group. Other roles get HTTP 400, which leaves the member counts, the percentages over every member, and the inactive values out as `permission_denied`. A subgroup has no list of its own, so its inactive values are left out as `not_read` |
+| Custom roles, when a member has one | trust+ | Owner, GitLab Ultimate on GitLab.com. A GitLab Self-Managed instance lists custom roles only to an administrator. Without them, the admin counts are left out with a `partial` gap |
 | Group access tokens | trust+ | Owner. Other roles get HTTP 401, which leaves the credential values out as `permission_denied` |
 | Project access tokens | trust+ | Maintainer or above |
 | Deploy keys | trust+ | Maintainer or above. The detailed counts are audit+ |

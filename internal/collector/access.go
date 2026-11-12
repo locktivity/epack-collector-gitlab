@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -143,6 +144,20 @@ func notBillable(unknown, total int) error {
 		"which has no Guests on Ultimate. GitLab's GraphQL API has their lastActivityOn, which this collector does not read", unknown, total))
 }
 
+// onlyBillable explains n members who hold a role only in a subgroup or a
+// project, whose SAML identity and two-factor authentication are then not
+// known.
+func onlyBillable(n int) error {
+	return componentsdk.CodeError(componentsdk.CodeNotRead, fmt.Errorf("%d members hold a role only in a subgroup or a project. "+
+		"GitLab's member list for the group, which has two_factor_enabled and group_saml_identity, does not list them, "+
+		"and this collector does not read the member lists of the subgroups and projects", n))
+}
+
+// errRoleNotListed explains a member whose custom role is not in the
+// group's list of custom roles.
+var errRoleNotListed = componentsdk.CodeError(componentsdk.CodeInvalidResponse,
+	errors.New("a member's custom role is not in the group's list of custom roles"))
+
 // errNoCredentialCreatedAt explains a credential without created_at.
 var errNoCredentialCreatedAt = componentsdk.CodeError(componentsdk.CodeInvalidResponse, errors.New("a credential in the response has no created_at"))
 
@@ -167,6 +182,44 @@ type memberStats struct {
 	admins, adminsMFA, adminsMFAUnknown int
 	ownerFields, twoFactorField         bool
 	samlUser, scimUser                  bool
+	// adminsUnknown counts the members with a custom role that could not
+	// be told apart from an admin's, for adminsErr.
+	adminsUnknown int
+	adminsErr     error
+}
+
+// customRoles are the group's custom roles by ID, or the error that kept
+// them from being read.
+type customRoles struct {
+	byID map[int]gitlab.MemberRole
+	err  error
+}
+
+func newCustomRoles(roles []gitlab.MemberRole, err error) customRoles {
+	r := customRoles{byID: make(map[int]gitlab.MemberRole, len(roles)), err: err}
+	for _, role := range roles {
+		r.byID[role.ID] = role
+	}
+	return r
+}
+
+// admin reports whether m can change who has access to the group, or
+// delete it: an Owner, or a member whose custom role can manage the
+// group's members or delete the group. The error says why it can't be told.
+func (r customRoles) admin(m gitlab.Member) (bool, error) {
+	switch {
+	case m.AccessLevel >= ownerAccessLevel:
+		return true, nil
+	case m.MemberRole == nil:
+		return false, nil
+	case r.err != nil:
+		return false, r.err
+	}
+	role, ok := r.byID[m.MemberRole.ID]
+	if !ok {
+		return false, errRoleNotListed
+	}
+	return role.AdminGroupMember || role.RemoveGroup, nil
 }
 
 // counted reports whether the access-posture artifact counts m as a member.
@@ -174,11 +227,12 @@ func counted(m gitlab.Member) bool {
 	return m.State == "active" && !botUsername.MatchString(m.Username)
 }
 
-// countMembers counts members. ownerFields is true when any listed member
-// has two_factor_enabled or a SAML or SCIM identity, which only Owners can
-// see. twoFactorField is true when any has two_factor_enabled, which needs
+// countMembers counts members, with roles saying which custom roles make
+// an admin. ownerFields is true when any listed member has
+// two_factor_enabled or a SAML or SCIM identity, which only Owners can see.
+// twoFactorField is true when any has two_factor_enabled, which needs
 // GitLab 19.4 or later.
-func countMembers(members []gitlab.Member) memberStats {
+func countMembers(members []gitlab.Member, roles customRoles) memberStats {
 	var s memberStats
 	for _, m := range members {
 		s.twoFactorField = s.twoFactorField || m.TwoFactorEnabled != nil
@@ -188,8 +242,12 @@ func countMembers(members []gitlab.Member) memberStats {
 		if !counted(m) {
 			continue
 		}
-		admin := m.AccessLevel >= ownerAccessLevel
+		admin, err := roles.admin(m)
 		s.members++
+		if err != nil {
+			s.adminsUnknown++
+			s.adminsErr = cmp.Or(s.adminsErr, err)
+		}
 		if admin {
 			s.admins++
 		}
@@ -212,10 +270,28 @@ func countMembers(members []gitlab.Member) memberStats {
 	return s
 }
 
-// countInactive counts the members countMembers counts whose last activity
-// in the billable members list is empty or before the date 90 days before
-// now. last_activity_on is a date, so a member active on that date counts as
-// active. unknown counts the members the list does not have.
+// billableOnly returns the users in billable that members does not list,
+// leaving out those who are not active and bot users. They hold a role
+// only in a subgroup or a project.
+func billableOnly(members []gitlab.Member, billable []gitlab.BillableMember) []gitlab.BillableMember {
+	listed := make(map[int]bool, len(members))
+	for _, m := range members {
+		listed[m.ID] = true
+	}
+	var out []gitlab.BillableMember
+	for _, b := range billable {
+		if !listed[b.ID] && b.State == "active" && !botUsername.MatchString(b.Username) {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// countInactive counts the members countMembers counts, and the users only
+// billable holds, whose last activity in the billable members list is empty
+// or before the date 90 days before now. last_activity_on is a date, so a
+// member active on that date counts as active. unknown counts the members
+// the list does not have.
 func countInactive(members []gitlab.Member, billable []gitlab.BillableMember, now time.Time) (inactive, unknown int) {
 	activity := make(map[int]*gitlab.Date, len(billable))
 	for _, b := range billable {
@@ -235,7 +311,23 @@ func countInactive(members []gitlab.Member, billable []gitlab.BillableMember, no
 			inactive++
 		}
 	}
+	for _, b := range billableOnly(members, billable) {
+		if b.LastActivityOn == nil || b.LastActivityOn.Before(cutoff) {
+			inactive++
+		}
+	}
 	return inactive, unknown
+}
+
+// readMemberRoles reads the group's custom roles, which say whether a
+// member who holds one is an admin. They are read only when a listed
+// member holds one.
+func (c *Collector) readMemberRoles(ctx context.Context) {
+	if c.reads.membersErr != nil || !slices.ContainsFunc(c.reads.members, func(m gitlab.Member) bool { return m.MemberRole != nil }) {
+		return
+	}
+	c.status("Fetching custom roles...")
+	c.reads.roles, c.reads.rolesErr = c.client.ListMemberRoles(ctx, c.config.Group)
 }
 
 // readBillableMembers reads the group's billable members, whose last
@@ -403,8 +495,16 @@ func (c *Collector) fillMembers(ap *AccessPosture, a accessLog) {
 	a.notRead("/members/external_members_present", externalNotRead)
 	a.notReadCount("/members/external_member_count", externalNotRead)
 
-	s := countMembers(c.reads.members)
+	s := countMembers(c.reads.members, newCustomRoles(c.reads.roles, c.reads.rolesErr))
 	hidden := s.members > 0 && !s.ownerFields
+	// The billable members list adds the people who hold a role only in a
+	// subgroup or a project. The group's member list has their SAML
+	// identity and two-factor authentication only for the people it lists.
+	// When the billable list could not be read, unlisted says why the
+	// values over every member are left out.
+	extra := len(billableOnly(c.reads.members, c.reads.billable))
+	s.members += extra
+	unlisted := c.reads.billableErr
 
 	ap.SignIn.SSOConfigured = a.identitySetup("/sign_in/sso_configured", s.samlUser, hidden, noSSOSetup)
 	ap.SignIn.SCIMEnabled = a.identitySetup("/sign_in/scim_enabled", s.scimUser, hidden, noSCIMSetup)
@@ -412,35 +512,69 @@ func (c *Collector) fillMembers(ap *AccessPosture, a accessLog) {
 	// Every member counts as local, since GitLab's API has no field for
 	// whether a group enforces SSO-only sign-in.
 	m := &ap.Members
-	m.MembersPresent = ptr(s.members > 0)
-	m.MemberCount = a.count(s.members)
-	m.LocalMembersPresent = ptr(s.members > 0)
-	m.LocalMemberCount = a.count(s.members)
+	switch {
+	case unlisted == nil:
+		m.MembersPresent = ptr(s.members > 0)
+		m.MemberCount = a.count(s.members)
+		m.LocalMembersPresent = ptr(s.members > 0)
+		m.LocalMemberCount = a.count(s.members)
+	case s.members > 0:
+		m.MembersPresent, m.LocalMembersPresent = ptr(true), ptr(true)
+		a.leaveOut(unlisted, "/members/member_count")
+		a.leaveOut(unlisted, "/members/local_member_count")
+	default:
+		a.leaveOut(unlisted, "/members/member_count", "/members/members_present")
+		a.leaveOut(unlisted, "/members/local_member_count", "/members/local_members_present")
+	}
 	switch {
 	case hidden:
-		a.hidden("/members/sso_member_count", "/members/local_mfa_member_count")
-		a.hiddenAtEveryLevel("/members/sso_coverage_pct", "/members/local_mfa_coverage_pct")
-	case s.mfaUnknown > 0 && !s.twoFactorField:
-		m.SSOMemberCount = a.count(s.sso)
-		m.SSOCoveragePct = share(s.sso, s.members, componentsdk.RoundDown)
-		a.noMFAField("/members/local_mfa_member_count", "/members/local_mfa_coverage_pct")
-	case s.mfaUnknown > 0:
-		m.SSOMemberCount = a.count(s.sso)
-		m.SSOCoveragePct = share(s.sso, s.members, componentsdk.RoundDown)
-		a.unknownMFA(s.mfaUnknown, "/members/local_mfa_member_count", "/members/local_mfa_coverage_pct")
+		a.hidden("/members/sso_member_count")
+		a.hiddenAtEveryLevel("/members/sso_coverage_pct")
+	case unlisted != nil:
+		a.leaveOut(unlisted, "/members/sso_member_count", "/members/sso_coverage_pct")
+	case s.samlUser && extra > 0:
+		a.partialCount(extra, onlyBillable(extra), "/members/sso_member_count", "/members/sso_coverage_pct")
 	default:
 		m.SSOMemberCount = a.count(s.sso)
 		m.SSOCoveragePct = share(s.sso, s.members, componentsdk.RoundDown)
+	}
+	switch {
+	case hidden:
+		a.hidden("/members/local_mfa_member_count")
+		a.hiddenAtEveryLevel("/members/local_mfa_coverage_pct")
+	case unlisted != nil:
+		a.leaveOut(unlisted, "/members/local_mfa_member_count", "/members/local_mfa_coverage_pct")
+	case s.mfaUnknown > 0 && !s.twoFactorField:
+		a.noMFAField("/members/local_mfa_member_count", "/members/local_mfa_coverage_pct")
+	case s.mfaUnknown > 0:
+		a.unknownMFA(s.mfaUnknown+extra, "/members/local_mfa_member_count", "/members/local_mfa_coverage_pct")
+	case extra > 0:
+		a.partialCount(extra, onlyBillable(extra), "/members/local_mfa_member_count", "/members/local_mfa_coverage_pct")
+	default:
 		m.LocalMFAMemberCount = a.count(s.mfa)
 		m.LocalMFACoveragePct = share(s.mfa, s.members, componentsdk.RoundDown)
 	}
 	c.fillInactive(m, a, s.members)
 
 	ad := &ap.Admins
-	ad.AdminsPresent = ptr(s.admins > 0)
+	if s.admins > 0 || s.adminsUnknown == 0 {
+		ad.AdminsPresent = ptr(s.admins > 0)
+		ad.LocalAdminsPresent = ptr(s.admins > 0)
+	} else {
+		a.partial(s.adminsUnknown, s.adminsErr, "/admins/admins_present", "/admins/local_admins_present")
+	}
+	if s.adminsUnknown > 0 {
+		a.partialCount(s.adminsUnknown, s.adminsErr, "/admins/admin_count", "/admins/admin_share_pct")
+		a.partialCount(s.adminsUnknown, s.adminsErr, "/admins/local_admin_count")
+		a.partialCount(s.adminsUnknown, s.adminsErr, "/admins/local_mfa_admin_count", "/admins/local_admin_mfa_coverage_pct")
+		return
+	}
 	ad.AdminCount = a.count(s.admins)
-	ad.AdminSharePct = share(s.admins, s.members, componentsdk.RoundUp)
-	ad.LocalAdminsPresent = ptr(s.admins > 0)
+	if unlisted != nil {
+		a.gaps.rec.NotCollected(access("/admins/admin_share_pct"), unlisted)
+	} else {
+		ad.AdminSharePct = share(s.admins, s.members, componentsdk.RoundUp)
+	}
 	ad.LocalAdminCount = a.count(s.admins)
 	switch {
 	case hidden && s.admins > 0:
@@ -462,7 +596,7 @@ func (c *Collector) fillInactive(m *AccessMembers, a accessLog, total int) {
 	const count, pct = "/members/inactive_member_count", "/members/inactive_pct"
 	r := c.reads
 	switch {
-	case total == 0:
+	case total == 0 && r.billableErr == nil:
 		m.InactiveMemberCount = a.count(0)
 		m.InactivePct = share(0, 0, componentsdk.RoundUp)
 		return
@@ -635,6 +769,17 @@ func (a accessLog) noMFAField(count, pct string) {
 		a.unsupported(count, noTwoFactorField)
 	}
 	a.unsupported(pct, noTwoFactorField)
+}
+
+// partialCount records the count at count, from the audit level, and the
+// values at pointers as left out because unmeasured of the items they cover
+// could not be measured, with err saying why.
+func (a accessLog) partialCount(unmeasured int, err error, count string, pointers ...string) {
+	a.gaps.rec.Helper()
+	if a.audit {
+		a.partial(unmeasured, err, count)
+	}
+	a.partial(unmeasured, err, pointers...)
 }
 
 func (a accessLog) partial(unmeasured int, err error, pointers ...string) {
