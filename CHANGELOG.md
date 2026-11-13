@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.2.6
+
+- The collector is built on epack v0.12.2.
+
 ## v0.2.5
 
 - In the access file, the members of a top-level group include the active users in its billable members list, who hold a role only in a subgroup or a project. The group's member list has no SAML identity or two-factor authentication for them, so with such a member the MFA values, and the SSO values in a group with SAML identities, are left out with a `partial` gap. When the billable members list can't be read, the member counts and the percentages over every member are left out with its gap.
